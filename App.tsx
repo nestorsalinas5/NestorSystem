@@ -1,5 +1,7 @@
 
 
+
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Page, Event, Client, Expense, User } from './types';
 import { getDashboardInsights } from './services/geminiService';
@@ -44,33 +46,25 @@ const AuthScreen: React.FC = () => {
         e.preventDefault();
         setLoading(true);
         
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        // The database trigger will now handle profile creation.
+        // We pass companyName in the options.data so the trigger can access it.
+        const { error } = await supabase.auth.signUp({
             email,
             password,
+            options: {
+                data: {
+                    company_name: companyName
+                }
+            }
         });
 
-        if (signUpError) {
-            alert(signUpError.message);
-            setLoading(false);
-            return;
+        if (error) {
+            alert(error.message);
+        } else {
+            alert("Registro exitoso. Por favor, revisa tu correo para confirmar tu cuenta.");
+            setIsRegistering(false); // Switch back to login view
         }
-
-        if (signUpData.user) {
-            // Now create the profile
-            const { error: profileError } = await supabase.from('profiles').insert({
-                id: signUpData.user.id,
-                company_name: companyName,
-                // Set a default activeUntil, e.g., one year from now
-                active_until: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString(),
-            });
-
-            if (profileError) {
-                alert("Error al crear el perfil de usuario: " + profileError.message);
-            } else {
-                alert("Registro exitoso. Por favor, revisa tu correo para confirmar tu cuenta antes de iniciar sesión.");
-                setIsRegistering(false); // Switch back to login view
-            }
-        }
+        
         setLoading(false);
     };
 
@@ -200,7 +194,8 @@ const App: React.FC = () => {
                 console.error("Error fetching auth users:", authError);
                 setUsers(data as User[]);
             } else {
-                const usersWithEmails = data.map(profile => {
+                // FIX: Add explicit type 'any' to 'profile' to avoid type inference issue with empty arrays.
+                const usersWithEmails = data.map((profile: any) => {
                     const authUser = authUsers.users.find(u => u.id === profile.id);
                     return { ...profile, email: authUser?.email };
                 });
