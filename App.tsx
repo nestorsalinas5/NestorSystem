@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Page, Event, Client, Expense, User } from './types';
 import { getDashboardInsights } from './services/geminiService';
@@ -180,7 +181,9 @@ const App: React.FC = () => {
         const eventToSave = { ...event, user_id: currentUser!.id, expenses: event.expenses || [] };
          if (!event.id) {
             // New event, remove temporary id from expenses
-            eventToSave.expenses.forEach(exp => delete (exp as any).id);
+            // FIX: The original forEach with delete was causing a TypeScript error.
+            // Re-mapping expenses to remove the temporary 'id' field used for UI keys is safer.
+            (eventToSave as any).expenses = eventToSave.expenses.map(({ type, amount }) => ({ type, amount }));
         }
         
         const { data, error } = await supabase.from('events').upsert(eventToSave).select().single();
@@ -587,7 +590,9 @@ const EventFormModal: React.FC<{
         setFormData(prev => ({ ...prev, client: { ...prev.client, [name]: value } }));
     };
     
-    const handleExpenseChange = (index: number, field: 'type' | 'amount', value: string | number) => {
+    // FIX: Changed `value` type from `string | number` to `string` to match call-site (`e.target.value`)
+    // and fix type error when assigning to a string property.
+    const handleExpenseChange = (index: number, field: 'type' | 'amount', value: string) => {
         const newExpenses = [...formData.expenses];
         if (field === 'amount') {
              newExpenses[index] = { ...newExpenses[index], [field]: Number(value) };
