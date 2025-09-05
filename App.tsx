@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Page, Event, Client, Expense, User } from './types';
 import { getDashboardInsights } from './services/geminiService';
@@ -7,7 +6,7 @@ import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, L
 import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon } from './components/Icons.tsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { createClient, AuthSession } from '@supabase/supabase-js';
+import { createClient, AuthSession, User as SupabaseUser } from '@supabase/supabase-js';
 
 // --- SUPABASE CLIENT ---
 const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL;
@@ -23,6 +22,109 @@ export const supabase = createClient(supabaseUrl!, supabaseAnonKey!);
 // --- HELPERS ---
 const formatGuarani = (amount: number) => 
     new Intl.NumberFormat('es-PY', { style: 'currency', currency: 'PYG', minimumFractionDigits: 0 }).format(amount);
+
+// --- AUTH SCREEN COMPONENT ---
+const AuthScreen: React.FC = () => {
+    const [isRegistering, setIsRegistering] = useState(false);
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [companyName, setCompanyName] = useState('');
+    const [loading, setLoading] = useState(false);
+
+    const handleLogin = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) alert(error.message);
+        setLoading(false);
+    };
+
+    const handleRegister = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+            email,
+            password,
+        });
+
+        if (signUpError) {
+            alert(signUpError.message);
+            setLoading(false);
+            return;
+        }
+
+        if (signUpData.user) {
+            // Now create the profile
+            const { error: profileError } = await supabase.from('profiles').insert({
+                id: signUpData.user.id,
+                email: email,
+                company_name: companyName,
+                // Set a default activeUntil, e.g., one year from now
+                active_until: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString(),
+            });
+
+            if (profileError) {
+                alert("Error al crear el perfil de usuario: " + profileError.message);
+            } else {
+                alert("Registro exitoso. Por favor, revisa tu correo para confirmar tu cuenta antes de iniciar sesión.");
+                setIsRegistering(false); // Switch back to login view
+            }
+        }
+        setLoading(false);
+    };
+
+    return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900">
+            <div className="p-8 bg-white dark:bg-gray-800 rounded-lg shadow-md w-96">
+                <h1 className="text-2xl font-bold mb-6 text-center text-gray-800 dark:text-gray-100">GestionSystemDj</h1>
+                
+                {isRegistering ? (
+                    // Registration Form
+                    <form onSubmit={handleRegister}>
+                        <div className="mb-4">
+                            <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="email">Email</label>
+                            <input type="email" id="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
+                        </div>
+                        <div className="mb-4">
+                            <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="companyName">Nombre de Empresa</label>
+                            <input type="text" id="companyName" value={companyName} onChange={e => setCompanyName(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
+                        </div>
+                        <div className="mb-6">
+                            <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="password">Contraseña</label>
+                            <input type="password" id="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
+                        </div>
+                        <button type="submit" disabled={loading} className="w-full bg-primary-600 text-white py-2 rounded-lg hover:bg-primary-700 transition duration-300 disabled:bg-primary-300">
+                            {loading ? 'Registrando...' : 'Registrarse'}
+                        </button>
+                        <p className="text-center mt-4 text-sm text-gray-600 dark:text-gray-400">
+                            ¿Ya tienes una cuenta? <button type="button" onClick={() => setIsRegistering(false)} className="text-primary-600 hover:underline">Inicia Sesión</button>
+                        </p>
+                    </form>
+                ) : (
+                    // Login Form
+                    <form onSubmit={handleLogin}>
+                        <div className="mb-4">
+                            <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="login-email">Usuario (Email)</label>
+                            <input type="text" id="login-email" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
+                        </div>
+                        <div className="mb-6">
+                            <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="login-password">Contraseña</label>
+                            <input type="password" id="login-password" value={password} onChange={e => setPassword(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
+                        </div>
+                        <button type="submit" disabled={loading} className="w-full bg-primary-600 text-white py-2 rounded-lg hover:bg-primary-700 transition duration-300 disabled:bg-primary-300">
+                            {loading ? 'Cargando...' : 'Iniciar Sesión'}
+                        </button>
+                        <p className="text-center mt-4 text-sm text-gray-600 dark:text-gray-400">
+                            ¿No tienes una cuenta? <button type="button" onClick={() => setIsRegistering(true)} className="text-primary-600 hover:underline">Regístrate</button>
+                        </p>
+                    </form>
+                )}
+            </div>
+        </div>
+    );
+};
+
 
 // Main App Component
 const App: React.FC = () => {
@@ -139,6 +241,7 @@ const App: React.FC = () => {
     };
 
     const saveUser = async (user: User, password?: string) => {
+        // The user object received here might have an empty string for id if new
         if (!user.id) { // Creating new user
             if (!user.email || !password || !user.companyName || !user.activeUntil) {
                 alert("Todos los campos son requeridos para crear un usuario.");
@@ -169,6 +272,7 @@ const App: React.FC = () => {
             } else {
                 setUsers(prev => prev.map(u => u.id === id ? user : u));
                 if (currentUser?.id === id) setCurrentUser(user);
+                 alert("Perfil actualizado exitosamente.");
             }
         }
     };
@@ -188,49 +292,13 @@ const App: React.FC = () => {
         return `${data.publicUrl}?t=${new Date().getTime()}`;
     };
     
-    // --- LOGIN SCREEN ---
-    const LoginScreen = () => {
-        const [email, setEmail] = useState('');
-        const [password, setPassword] = useState('');
-        const [loading, setLoading] = useState(false);
-
-        const handleLogin = async (e: React.FormEvent) => {
-            e.preventDefault();
-            setLoading(true);
-            const { error } = await supabase.auth.signInWithPassword({ email, password });
-            if (error) alert(error.message);
-            setLoading(false);
-        };
-
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900">
-                <div className="p-8 bg-white dark:bg-gray-800 rounded-lg shadow-md w-96">
-                    <h1 className="text-2xl font-bold mb-6 text-center text-gray-800 dark:text-gray-100">GestionSystemDj</h1>
-                    <form onSubmit={handleLogin}>
-                        <div className="mb-4">
-                            <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="email">Usuario</label>
-                            <input type="text" id="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
-                        </div>
-                        <div className="mb-6">
-                            <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="password">Contraseña</label>
-                            <input type="password" id="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
-                        </div>
-                        <button type="submit" disabled={loading} className="w-full bg-primary-600 text-white py-2 rounded-lg hover:bg-primary-700 transition duration-300 disabled:bg-primary-300">
-                            {loading ? 'Cargando...' : 'Iniciar Sesión'}
-                        </button>
-                    </form>
-                </div>
-            </div>
-        );
-    };
-
 
     if (loading) {
         return <div className="h-screen w-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200">Cargando...</div>;
     }
 
     if (!session || !currentUser) {
-        return <LoginScreen />;
+        return <AuthScreen />;
     }
     
     // --- MAIN APP UI ---
@@ -359,7 +427,9 @@ const UserManagementPage: React.FC<{
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
     const handleOpenModal = (user: User | null) => {
-        setSelectedUser(user);
+        // For new user, create a blank slate object
+        const userToEdit = user ? user : { id: '', email: '', role: 'user', status: 'active', activeUntil: '', companyName: '' };
+        setSelectedUser(userToEdit);
         setIsModalOpen(true);
     };
     
@@ -416,7 +486,7 @@ const UserFormModal: React.FC<{
 }> = ({ user, onSave, onClose }) => {
     const [formData, setFormData] = useState<User>(user || { id: '', email: '', role: 'user', status: 'active', activeUntil: '', companyName: '' });
     const [password, setPassword] = useState('');
-    const isNewUser = !user;
+    const isNewUser = !user || !user.id;
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
@@ -512,6 +582,10 @@ const SettingsPage: React.FC<{
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [isUploading, setIsUploading] = useState(false);
 
+    useEffect(() => {
+        setUser(currentUser);
+    }, [currentUser]);
+
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
             setLogoFile(e.target.files[0]);
@@ -531,7 +605,6 @@ const SettingsPage: React.FC<{
             setIsUploading(false);
         }
         await saveUser(updatedUser);
-        alert("Configuración guardada.");
     };
 
     return (
