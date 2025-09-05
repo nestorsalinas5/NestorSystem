@@ -1,6 +1,7 @@
 
 
 
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Page, Event, Client, Expense, User } from './types';
 import { getDashboardInsights } from './services/geminiService';
@@ -581,7 +582,11 @@ const EventFormModal: React.FC<{
         location: event?.location || '',
         date: event?.date ? new Date(event.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         amountCharged: event?.amountCharged || 0,
-        expenses: event?.expenses || [],
+        // FIX: Ensure expenses from DB have a temporary client-side ID for list keys and editing.
+        expenses: (event?.expenses || []).map((exp, index) => ({
+            ...exp,
+            id: (exp as any).id || `temp-${Date.now()}-${index}`,
+        })),
         observations: event?.observations || '',
     }), [event]);
 
