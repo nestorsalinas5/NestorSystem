@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Page, Event, Client, Expense, User } from './types';
 import { getDashboardInsights } from './services/geminiService';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon } from './components/Icons.tsx';
+import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon } from './components/Icons.tsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { createClient, AuthSession, User as SupabaseUser } from '@supabase/supabase-js';
@@ -42,7 +42,6 @@ const AuthScreen: React.FC = () => {
             <div className="p-8 bg-white dark:bg-gray-800 rounded-lg shadow-md w-96">
                 <h1 className="text-2xl font-bold mb-6 text-center text-gray-800 dark:text-gray-100">GestionSystemDj</h1>
                 
-                {/* Login Form */}
                 <form onSubmit={handleLogin}>
                     <div className="mb-4">
                         <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="login-email">Usuario (Email)</label>
@@ -90,7 +89,6 @@ const App: React.FC = () => {
             console.error('Error fetching user profile:', error);
             return null;
         }
-        // Also fetch email from auth user to display in admin panel
         const { data: { user } } = await supabase.auth.getUser();
         return { ...data, email: user?.email } as User;
     }, []);
@@ -123,43 +121,37 @@ const App: React.FC = () => {
 
 
     const fetchAdminData = useCallback(async () => {
-        // This is a simplified fetch. A real-world app would need to join with auth.users to get emails.
-        // For now, we assume the edge function or triggers keep email in sync if needed, or we fetch it separately.
         const { data, error } = await supabase.from('profiles').select('*');
         if (error) {
             console.error("Error fetching users:", error);
+            return;
+        }
+        
+        const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
+        if (authError) {
+            console.error("Error fetching auth users:", authError);
+            setUsers(data as User[] || []);
+            return;
+        }
+
+        if (data && authUsers?.users) {
+            const usersWithEmails = (data as User[]).map((profile) => {
+                const authUser = authUsers.users.find(u => u.id === profile.id);
+                return { ...profile, email: authUser?.email };
+            });
+            setUsers(usersWithEmails);
         } else {
-            // This is inefficient, but will work for a small number of users.
-            // A better solution is a database function (RPC).
-            const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
-            if (authError) {
-                console.error("Error fetching auth users:", authError);
-                // FIX: Added null check for data to prevent errors.
-                setUsers((data as User[]) || []);
-            } else {
-                // FIX: Added checks for data and authUsers being non-null to prevent runtime errors.
-                if (data && authUsers) {
-                    // FIX: The type of `profile` was being inferred as `never`. Casting `data` to `User[]` provides the correct type context.
-                    const usersWithEmails = (data as User[]).map((profile) => {
-                        const authUser = authUsers.users.find(u => u.id === profile.id);
-                        return { ...profile, email: authUser?.email };
-                    });
-                    setUsers(usersWithEmails);
-                } else {
-                    setUsers((data as User[]) || []);
-                }
-            }
+            setUsers(data as User[] || []);
         }
     }, []);
 
     const fetchUserData = useCallback(async (userId: string) => {
-        const { data, error } = await supabase.from('events').select('*').eq('user_id', userId);
+        const { data, error } = await supabase.from('events').select('*').eq('user_id', userId).order('date', { ascending: false });
         if (error) console.error("Error fetching events:", error);
-        else setEvents(data as Event[]);
+        else setEvents(data as Event[] || []);
     }, []);
 
 
-    // Data fetching based on user role
     useEffect(() => {
         if (!currentUser) return;
         
@@ -185,7 +177,12 @@ const App: React.FC = () => {
     const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
     
     const saveEvent = async (event: Event) => {
-        const eventToSave = { ...event, user_id: currentUser!.id };
+        const eventToSave = { ...event, user_id: currentUser!.id, expenses: event.expenses || [] };
+         if (!event.id) {
+            // New event, remove temporary id from expenses
+            eventToSave.expenses.forEach(exp => delete (exp as any).id);
+        }
+        
         const { data, error } = await supabase.from('events').upsert(eventToSave).select().single();
         if (error) {
             alert("Error al guardar el evento: " + error.message);
@@ -198,13 +195,12 @@ const App: React.FC = () => {
         if (window.confirm('¿Estás seguro de que quieres eliminar este evento?')) {
             const { error } = await supabase.from('events').delete().match({ id: eventId });
             if (error) alert("Error al eliminar evento: " + error.message);
-            else setEvents(events.filter(e => e.id !== eventId));
+            else await fetchUserData(currentUser!.id);
         }
     };
 
     const saveUser = async (user: User, password?: string) => {
-        // The user object received here might have an empty string for id if new
-        if (!user.id) { // Creating new user
+        if (!user.id) {
             if (!user.email || !password || !user.companyName || !user.activeUntil) {
                 alert("Todos los campos son requeridos para crear un usuario.");
                 return;
@@ -223,18 +219,17 @@ const App: React.FC = () => {
                 alert("Error al crear usuario: " + error.message);
             } else {
                 alert("Usuario creado exitosamente.");
-                await fetchAdminData(); // Refresh user list
+                await fetchAdminData();
             }
 
-        } else { // Existing user
-            const { id, email, ...updateData } = user; // email should not be updated from here
+        } else { 
+            const { id, email, ...updateData } = user;
             const { error } = await supabase.from('profiles').update(updateData).eq('id', id);
             if (error) {
                 alert("Error actualizando perfil: " + error.message);
             } else {
-                await fetchAdminData(); // Refetch all users to get updated info
+                await fetchAdminData();
                 if (currentUser?.id === id) {
-                    // Refetch current user profile as well
                     const updatedProfile = await fetchUserProfile(id);
                     setCurrentUser(updatedProfile);
                 }
@@ -258,7 +253,6 @@ const App: React.FC = () => {
         return `${data.publicUrl}?t=${new Date().getTime()}`;
     };
     
-
     if (loading) {
         return <div className="h-screen w-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200">Cargando...</div>;
     }
@@ -267,7 +261,6 @@ const App: React.FC = () => {
         return <AuthScreen />;
     }
     
-    // --- MAIN APP UI ---
     return (
       <div className="flex h-screen bg-gray-100 dark:bg-slate-900 text-gray-900 dark:text-gray-100">
         <Sidebar 
@@ -292,14 +285,12 @@ const App: React.FC = () => {
                 users={users}
                 saveUser={saveUser}
                 uploadLogo={uploadLogo}
-                setCurrentPage={setCurrentPage}
             />
         </main>
       </div>
     );
 };
 
-// --- PAGE ROUTER ---
 const PageContent: React.FC<{
     currentPage: Page;
     currentUser: User;
@@ -309,7 +300,6 @@ const PageContent: React.FC<{
     users: User[];
     saveUser: (user: User, password?: string) => Promise<void>;
     uploadLogo: (userId: string, file: File) => Promise<string | null>;
-    setCurrentPage: (page: Page) => void;
 }> = (props) => {
     switch (props.currentPage) {
         case 'dashboard':
@@ -318,21 +308,20 @@ const PageContent: React.FC<{
                 : <DashboardUser events={props.events} />;
         case 'events':
             return <EventsPage events={props.events} saveEvent={props.saveEvent} deleteEvent={props.deleteEvent} />;
-        case 'userManagement':
-            return <UserManagementPage users={props.users} saveUser={props.saveUser} />;
         case 'clients':
-             return <div>Página de Clientes en construcción.</div>;
+            return <ClientsPage events={props.events} />;
+        case 'agenda':
+            return <AgendaPage events={props.events} />;
         case 'reports':
-             return <div>Página de Reportes en construcción.</div>;
+            return <ReportsPage events={props.events} currentUser={props.currentUser} />;
         case 'settings':
              return <SettingsPage currentUser={props.currentUser} saveUser={props.saveUser} uploadLogo={props.uploadLogo} />;
+        case 'userManagement':
+            return <UserManagementPage users={props.users} saveUser={props.saveUser} />;
         default:
             return <div>Página no encontrada o en construcción.</div>;
     }
 };
-
-
-// --- PAGE COMPONENTS ---
 
 const DashboardAdmin: React.FC<{users: User[]}> = ({users}) => {
     const activeUsers = users.filter(u => u.status === 'active').length;
@@ -364,7 +353,6 @@ const DashboardAdmin: React.FC<{users: User[]}> = ({users}) => {
 };
 
 const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
-    // Basic dashboard logic, should be expanded
     const totalIncome = events.reduce((acc, event) => acc + event.amountCharged, 0);
     const totalExpenses = events.reduce((acc, event) => acc + (event.expenses?.reduce((expAcc, exp) => expAcc + exp.amount, 0) || 0), 0);
     return (
@@ -393,7 +381,6 @@ const UserManagementPage: React.FC<{
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
     const handleOpenModal = (user: User | null) => {
-        // For new user, create a blank slate object
         const userToEdit: User = user ? { ...user } : { id: '', email: '', role: 'user', status: 'active', activeUntil: '', companyName: '' };
         setSelectedUser(userToEdit);
         setIsModalOpen(true);
@@ -427,7 +414,7 @@ const UserManagementPage: React.FC<{
                                 <td className="p-2">{user.email}</td>
                                 <td className="p-2">{user.companyName}</td>
                                 <td className="p-2">
-                                    <span className={`px-2 py-1 rounded-full text-xs ${user.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                    <span className={`px-2 py-1 rounded-full text-xs ${user.status === 'active' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'}`}>
                                         {user.status === 'active' ? 'Activo' : 'Inactivo'}
                                     </span>
                                 </td>
@@ -531,13 +518,427 @@ const EventsPage: React.FC<{
                 <h3 className="text-xl font-semibold">Mis Eventos</h3>
                 <button onClick={() => handleOpenModal(null)} className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700">Añadir Evento</button>
             </div>
-             {/* Event list would go here */}
-             <p>Lista de eventos en construcción.</p>
-            {isModalOpen && <div className="fixed inset-0 bg-black bg-opacity-50 z-40"></div> /* Backdrop */}
-            {isModalOpen && <div className="fixed inset-0 z-50 flex items-center justify-center"><p className='bg-white p-4 rounded-lg'>Formulario de Eventos en construcción.</p> <button onClick={() => setIsModalOpen(false)}>Cerrar</button></div>}
+             <div className="overflow-x-auto">
+                 <table className="w-full text-left">
+                    <thead className="border-b dark:border-gray-700">
+                        <tr>
+                            <th className="p-2">Fecha</th>
+                            <th className="p-2">Evento</th>
+                            <th className="p-2">Cliente</th>
+                            <th className="p-2">Monto</th>
+                            <th className="p-2">Ganancia</th>
+                            <th className="p-2">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {events.length === 0 && <tr><td colSpan={6} className="text-center p-4 text-gray-500">No has registrado ningún evento.</td></tr>}
+                        {events.map(event => {
+                            const eventExpenses = event.expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
+                            const netProfit = event.amountCharged - eventExpenses;
+                            return (
+                                <tr key={event.id} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                    <td className="p-2">{new Date(event.date).toLocaleDateString()}</td>
+                                    <td className="p-2 font-medium">{event.name}</td>
+                                    <td className="p-2">{event.client.name}</td>
+                                    <td className="p-2 text-green-600 dark:text-green-400">{formatGuarani(event.amountCharged)}</td>
+                                    <td className={`p-2 font-semibold ${netProfit >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-red-500'}`}>{formatGuarani(netProfit)}</td>
+                                    <td className="p-2 flex space-x-2">
+                                        <button onClick={() => handleOpenModal(event)} className="text-primary-600 hover:underline">Editar</button>
+                                        <button onClick={() => deleteEvent(event.id)} className="text-red-500 hover:underline">Eliminar</button>
+                                    </td>
+                                </tr>
+                            )
+                        })}
+                    </tbody>
+                </table>
+            </div>
+            {isModalOpen && <EventFormModal event={selectedEvent} onSave={handleSave} onClose={() => setIsModalOpen(false)} />}
         </div>
     );
 };
+
+const EventFormModal: React.FC<{
+    event: Event | null,
+    onSave: (event: Event) => void,
+    onClose: () => void
+}> = ({ event, onSave, onClose }) => {
+    const isNewEvent = !event;
+    const initialEventState: Event = useMemo(() => ({
+        id: event?.id || '',
+        user_id: event?.user_id || '',
+        name: event?.name || '',
+        client: event?.client || { name: '', phone: '', email: '' },
+        location: event?.location || '',
+        date: event?.date ? new Date(event.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        amountCharged: event?.amountCharged || 0,
+        expenses: event?.expenses || [],
+        observations: event?.observations || '',
+    }), [event]);
+
+    const [formData, setFormData] = useState<Event>(initialEventState);
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleClientChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({ ...prev, client: { ...prev.client, [name]: value } }));
+    };
+    
+    const handleExpenseChange = (index: number, field: 'type' | 'amount', value: string | number) => {
+        const newExpenses = [...formData.expenses];
+        if (field === 'amount') {
+             newExpenses[index] = { ...newExpenses[index], [field]: Number(value) };
+        } else {
+             newExpenses[index] = { ...newExpenses[index], [field]: value };
+        }
+        setFormData(prev => ({ ...prev, expenses: newExpenses }));
+    };
+
+    const addExpense = () => {
+        setFormData(prev => ({ ...prev, expenses: [...prev.expenses, { id: `temp-${Date.now()}`, type: '', amount: 0 }] }));
+    };
+
+    const removeExpense = (id: string) => {
+        setFormData(prev => ({ ...prev, expenses: prev.expenses.filter(exp => exp.id !== id) }));
+    };
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onSave(formData);
+    };
+    
+    const totalExpenses = formData.expenses.reduce((sum, exp) => sum + exp.amount, 0);
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-start z-50 p-4 overflow-y-auto">
+            <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-xl w-full max-w-2xl my-8">
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-2xl font-bold">{isNewEvent ? 'Añadir Nuevo Evento' : 'Editar Evento'}</h2>
+                    <button onClick={onClose}><CloseIcon /></button>
+                </div>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    {/* Event Details */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input type="text" name="name" placeholder="Nombre del Evento" value={formData.name} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
+                        <input type="text" name="location" placeholder="Lugar" value={formData.location} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
+                        <input type="date" name="date" value={formData.date} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
+                        <input type="number" name="amountCharged" placeholder="Monto Cobrado" value={formData.amountCharged} onChange={e => setFormData(prev => ({...prev, amountCharged: Number(e.target.value)}))} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
+                    </div>
+                    {/* Client Details */}
+                    <div className="border-t pt-4 mt-4 dark:border-gray-700">
+                        <h3 className="font-semibold mb-2">Datos del Cliente</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <input type="text" name="name" placeholder="Nombre del Cliente" value={formData.client.name} onChange={handleClientChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
+                            <input type="tel" name="phone" placeholder="Teléfono" value={formData.client.phone} onChange={handleClientChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
+                            <input type="email" name="email" placeholder="Email (Opcional)" value={formData.client.email} onChange={handleClientChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
+                        </div>
+                    </div>
+                    {/* Expenses */}
+                    <div className="border-t pt-4 mt-4 dark:border-gray-700">
+                        <div className="flex justify-between items-center mb-2">
+                             <h3 className="font-semibold">Gastos</h3>
+                             <button type="button" onClick={addExpense} className="flex items-center space-x-1 text-sm bg-primary-600 text-white px-3 py-1 rounded hover:bg-primary-700"><PlusIcon /> <span>Añadir Gasto</span></button>
+                        </div>
+                        <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
+                            {formData.expenses.map((expense, index) => (
+                                <div key={expense.id} className="flex items-center gap-2">
+                                    <input type="text" placeholder="Tipo de Gasto" value={expense.type} onChange={e => handleExpenseChange(index, 'type', e.target.value)} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
+                                    <input type="number" placeholder="Monto" value={expense.amount} onChange={e => handleExpenseChange(index, 'amount', e.target.value)} className="w-48 p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
+                                    <button type="button" onClick={() => removeExpense(expense.id)} className="p-2 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/50 rounded-full"><TrashIcon /></button>
+                                </div>
+                            ))}
+                        </div>
+                         <div className="text-right mt-2 font-semibold">Total Gastos: {formatGuarani(totalExpenses)}</div>
+                    </div>
+                     {/* Observations & Summary */}
+                    <div className="border-t pt-4 mt-4 dark:border-gray-700">
+                        <textarea name="observations" placeholder="Observaciones..." value={formData.observations} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" rows={3}></textarea>
+                        <div className="text-right mt-2 text-lg font-bold">Ganancia Neta del Evento: {formatGuarani(formData.amountCharged - totalExpenses)}</div>
+                    </div>
+                    {/* Actions */}
+                    <div className="flex justify-end space-x-4 mt-8">
+                        <button type="button" onClick={onClose} className="px-4 py-2 rounded bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500">Cancelar</button>
+                        <button type="submit" className="px-4 py-2 rounded bg-primary-600 text-white hover:bg-primary-700">Guardar Evento</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+
+const ClientsPage: React.FC<{ events: Event[] }> = ({ events }) => {
+    const clients = useMemo(() => {
+        const clientMap = new Map<string, { client: Client; eventCount: number }>();
+        events.forEach(event => {
+            const key = `${event.client.name}-${event.client.phone}`;
+            if (clientMap.has(key)) {
+                clientMap.get(key)!.eventCount++;
+            } else {
+                clientMap.set(key, { client: event.client, eventCount: 1 });
+            }
+        });
+        return Array.from(clientMap.values()).sort((a,b) => b.eventCount - a.eventCount);
+    }, [events]);
+
+    return (
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+            <h3 className="text-xl font-semibold mb-4">Mis Clientes</h3>
+            <div className="overflow-x-auto">
+                 <table className="w-full text-left">
+                    <thead className="border-b dark:border-gray-700">
+                        <tr>
+                            <th className="p-2">Nombre</th>
+                            <th className="p-2">Teléfono</th>
+                            <th className="p-2">Email</th>
+                            <th className="p-2 text-center">N° de Eventos</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {clients.length === 0 && <tr><td colSpan={4} className="text-center p-4 text-gray-500">No tienes clientes registrados en tus eventos.</td></tr>}
+                        {clients.map(({ client, eventCount }) => (
+                            <tr key={`${client.name}-${client.phone}`} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                <td className="p-2 font-medium">{client.name}</td>
+                                <td className="p-2">{client.phone}</td>
+                                <td className="p-2">{client.email || 'N/A'}</td>
+                                <td className="p-2 text-center font-bold text-primary-600">{eventCount}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};
+
+const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events, currentUser }) => {
+    const [startDate, setStartDate] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
+    const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+
+    const filteredEvents = useMemo(() => {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999); // Include whole end day
+        return events.filter(event => {
+            const eventDate = new Date(event.date);
+            return eventDate >= start && eventDate <= end;
+        });
+    }, [events, startDate, endDate]);
+
+    const { totalIncome, totalExpenses, netProfit } = useMemo(() => {
+        let totalIncome = 0;
+        let totalExpenses = 0;
+        filteredEvents.forEach(event => {
+            totalIncome += event.amountCharged;
+            totalExpenses += event.expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
+        });
+        return { totalIncome, totalExpenses, netProfit: totalIncome - totalExpenses };
+    }, [filteredEvents]);
+    
+    const exportToPDF = () => {
+        const doc = new jsPDF();
+        const tableColumn = ["Fecha", "Evento", "Cliente", "Cobrado", "Gastos", "Ganancia"];
+        const tableRows: any[][] = [];
+
+        filteredEvents.forEach(event => {
+            const eventExpenses = event.expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
+            const eventProfit = event.amountCharged - eventExpenses;
+            const eventData = [
+                new Date(event.date).toLocaleDateString(),
+                event.name,
+                event.client.name,
+                formatGuarani(event.amountCharged),
+                formatGuarani(eventExpenses),
+                formatGuarani(eventProfit)
+            ];
+            tableRows.push(eventData);
+        });
+
+        const logoUrl = currentUser.companyLogoUrl;
+        if (logoUrl) {
+           // This requires CORS configuration on storage, might not work out of the box
+           // doc.addImage(logoUrl, 'PNG', 14, 10, 30, 30);
+        }
+        doc.setFontSize(18);
+        doc.text(currentUser.companyName, logoUrl ? 50 : 14, 22);
+        doc.setFontSize(12);
+        doc.text(`Reporte de Eventos del ${new Date(startDate).toLocaleDateString()} al ${new Date(endDate).toLocaleDateString()}`, 14, 30);
+
+        autoTable(doc, {
+            head: [tableColumn],
+            body: tableRows,
+            startY: 40,
+            theme: 'grid',
+            foot: [[
+                'TOTALES', '', '', 
+                formatGuarani(totalIncome), 
+                formatGuarani(totalExpenses), 
+                formatGuarani(netProfit)
+            ]],
+            footStyles: { fillColor: [22, 160, 133], textColor: 255, fontStyle: 'bold' }
+        });
+        doc.save(`Reporte_GestionSystemDj_${startDate}_${endDate}.pdf`);
+    };
+    
+    const exportToCSV = () => {
+        let csvContent = "data:text/csv;charset=utf-8,";
+        csvContent += "Fecha,Evento,Cliente,Telefono Cliente,Email Cliente,Lugar,Monto Cobrado,Gastos,Ganancia,Observaciones\n";
+
+        filteredEvents.forEach(event => {
+             const eventExpenses = event.expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
+             const eventProfit = event.amountCharged - eventExpenses;
+             const row = [
+                 new Date(event.date).toLocaleDateString(),
+                 `"${event.name.replace(/"/g, '""')}"`,
+                 `"${event.client.name.replace(/"/g, '""')}"`,
+                 event.client.phone,
+                 event.client.email || '',
+                 `"${event.location.replace(/"/g, '""')}"`,
+                 event.amountCharged,
+                 eventExpenses,
+                 eventProfit,
+                 `"${(event.observations || '').replace(/"/g, '""')}"`
+             ].join(',');
+            csvContent += row + "\r\n";
+        });
+        
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `Reporte_GestionSystemDj_${startDate}_${endDate}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+
+    return (
+        <div className="space-y-6">
+            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
+                <div className="flex flex-wrap items-center gap-4">
+                     <h3 className="text-lg font-semibold">Filtrar por Fecha:</h3>
+                     <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
+                     <span>hasta</span>
+                     <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
+                     <div className="flex-grow"></div>
+                     <div className="flex gap-2">
+                        <button onClick={exportToPDF} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 text-sm">Exportar PDF</button>
+                        <button onClick={exportToCSV} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm">Exportar CSV/Excel</button>
+                     </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                    <h3 className="text-lg font-semibold">Ingresos</h3>
+                    <p className="text-3xl font-bold text-green-500">{formatGuarani(totalIncome)}</p>
+                </div>
+                <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                    <h3 className="text-lg font-semibold">Gastos</h3>
+                    <p className="text-3xl font-bold text-red-500">{formatGuarani(totalExpenses)}</p>
+                </div>
+                 <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                    <h3 className="text-lg font-semibold">Ganancia Neta</h3>
+                    <p className="text-3xl font-bold text-blue-500">{formatGuarani(netProfit)}</p>
+                </div>
+            </div>
+            
+             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                <h3 className="text-xl font-semibold mb-4">Eventos del Período</h3>
+                <div className="overflow-x-auto">
+                     {/* Re-using the same table structure from EventsPage */}
+                     <table className="w-full text-left">
+                        <thead className="border-b dark:border-gray-700">
+                             <tr>
+                                <th className="p-2">Fecha</th>
+                                <th className="p-2">Evento</th>
+                                <th className="p-2">Cliente</th>
+                                <th className="p-2">Cobrado</th>
+                                <th className="p-2">Ganancia</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                             {filteredEvents.length === 0 && <tr><td colSpan={5} className="text-center p-4 text-gray-500">No hay eventos en el rango de fechas seleccionado.</td></tr>}
+                            {filteredEvents.map(event => {
+                                const eventExpenses = event.expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
+                                const netProfit = event.amountCharged - eventExpenses;
+                                return (
+                                    <tr key={event.id} className="border-b dark:border-gray-700">
+                                        <td className="p-2">{new Date(event.date).toLocaleDateString()}</td>
+                                        <td className="p-2 font-medium">{event.name}</td>
+                                        <td className="p-2">{event.client.name}</td>
+                                        <td className="p-2 text-green-600 dark:text-green-400">{formatGuarani(event.amountCharged)}</td>
+                                        <td className={`p-2 font-semibold ${netProfit >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-red-500'}`}>{formatGuarani(netProfit)}</td>
+                                    </tr>
+                                )
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+
+const AgendaPage: React.FC<{ events: Event[] }> = ({ events }) => {
+    const [currentDate, setCurrentDate] = useState(new Date());
+
+    const eventDays = useMemo(() => {
+        const days = new Set<string>();
+        events.forEach(event => {
+            days.add(new Date(event.date).toISOString().split('T')[0]);
+        });
+        return days;
+    }, [events]);
+
+    const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+    const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+    const startDay = startOfMonth.getDay(); // 0=Sunday, 1=Monday...
+    const daysInMonth = endOfMonth.getDate();
+    
+    const calendarDays = [];
+    for (let i = 0; i < startDay; i++) {
+        calendarDays.push(<div key={`empty-${i}`} className="border dark:border-gray-700"></div>);
+    }
+    for (let day = 1; day <= daysInMonth; day++) {
+        const dateStr = new Date(currentDate.getFullYear(), currentDate.getMonth(), day).toISOString().split('T')[0];
+        const isEventDay = eventDays.has(dateStr);
+        calendarDays.push(
+            <div key={day} className={`border dark:border-gray-700 p-2 text-center ${isEventDay ? 'bg-primary-100 dark:bg-primary-900/50' : ''}`}>
+                <span className={`w-8 h-8 flex items-center justify-center rounded-full ${isEventDay ? 'bg-primary-500 text-white font-bold' : ''}`}>
+                    {day}
+                </span>
+            </div>
+        );
+    }
+
+    const changeMonth = (offset: number) => {
+        setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() + offset, 1));
+    };
+
+    return (
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+            <div className="flex justify-between items-center mb-4">
+                <button onClick={() => changeMonth(-1)} className="px-4 py-2 rounded bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600">&lt; Anterior</button>
+                <h3 className="text-xl font-semibold">
+                    {currentDate.toLocaleString('es-ES', { month: 'long', year: 'numeric' }).replace(/^\w/, c => c.toUpperCase())}
+                </h3>
+                <button onClick={() => changeMonth(1)} className="px-4 py-2 rounded bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600">Siguiente &gt;</button>
+            </div>
+            <div className="grid grid-cols-7 gap-px bg-gray-200 dark:bg-gray-600">
+                 {['D', 'L', 'M', 'M', 'J', 'V', 'S'].map(day => (
+                    <div key={day} className="text-center font-bold p-2 bg-gray-100 dark:bg-gray-700">{day}</div>
+                 ))}
+                 {calendarDays}
+            </div>
+        </div>
+    );
+};
+
 
 const SettingsPage: React.FC<{
     currentUser: User, 
@@ -585,7 +986,7 @@ const SettingsPage: React.FC<{
                     <label className="block mb-2">Logo de la Empresa</label>
                     <div className="flex items-center space-x-4">
                         {user.companyLogoUrl && <img src={user.companyLogoUrl} alt="Logo" className="w-16 h-16 rounded-full object-cover" />}
-                        <input type="file" accept="image/*" onChange={handleFileChange} className="text-sm" />
+                        <input type="file" accept="image/*" onChange={handleFileChange} className="text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100 dark:file:bg-primary-900/50 dark:file:text-primary-300 dark:hover:file:bg-primary-900" />
                     </div>
                 </div>
                 <button type="submit" disabled={isUploading} className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 disabled:bg-primary-400">
@@ -596,8 +997,6 @@ const SettingsPage: React.FC<{
     )
 }
 
-// --- SHARED COMPONENTS ---
-
 const Sidebar: React.FC<{ currentPage: Page, setCurrentPage: (page: Page) => void, currentUser: User, handleLogout: () => void }> = ({ currentPage, setCurrentPage, currentUser, handleLogout }) => {
     const commonItems = [
         { page: 'dashboard' as Page, label: 'Dashboard', icon: <DashboardIcon /> },
@@ -606,6 +1005,7 @@ const Sidebar: React.FC<{ currentPage: Page, setCurrentPage: (page: Page) => voi
     const userItems = [
         { page: 'events' as Page, label: 'Ver Eventos', icon: <EventsIcon /> },
         { page: 'clients' as Page, label: 'Clientes', icon: <ClientsIcon /> },
+        { page: 'agenda' as Page, label: 'Agenda', icon: <AgendaIcon /> },
         { page: 'reports' as Page, label: 'Reportes', icon: <ReportsIcon /> },
         { page: 'settings' as Page, label: 'Configuración', icon: <SettingsIcon /> },
     ];
@@ -620,7 +1020,6 @@ const Sidebar: React.FC<{ currentPage: Page, setCurrentPage: (page: Page) => voi
         <aside className="w-64 bg-white dark:bg-gray-800 shadow-md flex flex-col">
             <div className="p-4 border-b dark:border-gray-700">
                 <h1 className="text-2xl font-bold text-primary-600">GestionSystemDj</h1>
-                <p className="text-sm text-gray-500 dark:text-gray-400">{currentUser.companyName}</p>
             </div>
             <nav className="flex-1 p-2">
                 {navItems.map(item => (
