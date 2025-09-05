@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Page, Event, Client, Expense, User } from './types';
 import { getDashboardInsights } from './services/geminiService';
@@ -24,10 +25,8 @@ const formatGuarani = (amount: number) =>
 
 // --- AUTH SCREEN COMPONENT ---
 const AuthScreen: React.FC = () => {
-    const [isRegistering, setIsRegistering] = useState(false);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [companyName, setCompanyName] = useState('');
     const [loading, setLoading] = useState(false);
 
     const handleLogin = async (e: React.FormEvent) => {
@@ -38,78 +37,25 @@ const AuthScreen: React.FC = () => {
         setLoading(false);
     };
 
-    const handleRegister = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setLoading(true);
-        
-        // The database trigger will now handle profile creation.
-        // We pass companyName in the options.data so the trigger can access it.
-        const { error } = await supabase.auth.signUp({
-            email,
-            password,
-            options: {
-                data: {
-                    company_name: companyName
-                }
-            }
-        });
-
-        if (error) {
-            alert(error.message);
-        } else {
-            alert("Registro exitoso. Por favor, revisa tu correo para confirmar tu cuenta.");
-            setIsRegistering(false); // Switch back to login view
-        }
-        
-        setLoading(false);
-    };
-
     return (
         <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900">
             <div className="p-8 bg-white dark:bg-gray-800 rounded-lg shadow-md w-96">
                 <h1 className="text-2xl font-bold mb-6 text-center text-gray-800 dark:text-gray-100">GestionSystemDj</h1>
                 
-                {isRegistering ? (
-                    // Registration Form
-                    <form onSubmit={handleRegister}>
-                        <div className="mb-4">
-                            <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="email">Email</label>
-                            <input type="email" id="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
-                        </div>
-                        <div className="mb-4">
-                            <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="companyName">Nombre de Empresa</label>
-                            <input type="text" id="companyName" value={companyName} onChange={e => setCompanyName(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
-                        </div>
-                        <div className="mb-6">
-                            <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="password">Contraseña</label>
-                            <input type="password" id="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
-                        </div>
-                        <button type="submit" disabled={loading} className="w-full bg-primary-600 text-white py-2 rounded-lg hover:bg-primary-700 transition duration-300 disabled:bg-primary-300">
-                            {loading ? 'Registrando...' : 'Registrarse'}
-                        </button>
-                        <p className="text-center mt-4 text-sm text-gray-600 dark:text-gray-400">
-                            ¿Ya tienes una cuenta? <button type="button" onClick={() => setIsRegistering(false)} className="text-primary-600 hover:underline">Inicia Sesión</button>
-                        </p>
-                    </form>
-                ) : (
-                    // Login Form
-                    <form onSubmit={handleLogin}>
-                        <div className="mb-4">
-                            <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="login-email">Usuario (Email)</label>
-                            <input type="text" id="login-email" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
-                        </div>
-                        <div className="mb-6">
-                            <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="login-password">Contraseña</label>
-                            <input type="password" id="login-password" value={password} onChange={e => setPassword(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
-                        </div>
-                        <button type="submit" disabled={loading} className="w-full bg-primary-600 text-white py-2 rounded-lg hover:bg-primary-700 transition duration-300 disabled:bg-primary-300">
-                            {loading ? 'Cargando...' : 'Iniciar Sesión'}
-                        </button>
-                        <p className="text-center mt-4 text-sm text-gray-600 dark:text-gray-400">
-                            ¿No tienes una cuenta? <button type="button" onClick={() => setIsRegistering(true)} className="text-primary-600 hover:underline">Regístrate</button>
-                        </p>
-                    </form>
-                )}
+                {/* Login Form */}
+                <form onSubmit={handleLogin}>
+                    <div className="mb-4">
+                        <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="login-email">Usuario (Email)</label>
+                        <input type="text" id="login-email" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
+                    </div>
+                    <div className="mb-6">
+                        <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="login-password">Contraseña</label>
+                        <input type="password" id="login-password" value={password} onChange={e => setPassword(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
+                    </div>
+                    <button type="submit" disabled={loading} className="w-full bg-primary-600 text-white py-2 rounded-lg hover:bg-primary-700 transition duration-300 disabled:bg-primary-300">
+                        {loading ? 'Cargando...' : 'Iniciar Sesión'}
+                    </button>
+                </form>
             </div>
         </div>
     );
@@ -191,14 +137,14 @@ const App: React.FC = () => {
                 // FIX: Added null check for data to prevent errors.
                 setUsers((data as User[]) || []);
             } else {
-                // FIX: Add explicit type 'any' to 'profile' to avoid type inference issue with empty arrays.
                 // FIX: Added checks for data and authUsers being non-null to prevent runtime errors.
                 if (data && authUsers) {
-                    const usersWithEmails = data.map((profile: any) => {
+                    // FIX: The type of `profile` was being inferred as `never`. Casting `data` to `User[]` provides the correct type context.
+                    const usersWithEmails = (data as User[]).map((profile) => {
                         const authUser = authUsers.users.find(u => u.id === profile.id);
                         return { ...profile, email: authUser?.email };
                     });
-                    setUsers(usersWithEmails as User[]);
+                    setUsers(usersWithEmails);
                 } else {
                     setUsers((data as User[]) || []);
                 }
@@ -714,7 +660,10 @@ const Header: React.FC<{ currentPage: Page, currentUser: User, toggleTheme: () =
 
     return (
         <header className="flex justify-between items-center mb-6">
-            <h2 className="text-3xl font-bold text-gray-800 dark:text-gray-100">{pageTitles[currentPage]}</h2>
+            <div>
+                <h2 className="text-3xl font-bold text-gray-800 dark:text-gray-100">{pageTitles[currentPage]}</h2>
+                <p className="text-md text-gray-500 dark:text-gray-400">Bienvenido, {currentUser.companyName}</p>
+            </div>
             <div className="flex items-center space-x-4">
                 {currentUser.role === 'user' && daysUntilExpiry <= 10 && (
                     <div className="bg-yellow-100 dark:bg-yellow-900 border-l-4 border-yellow-500 text-yellow-700 dark:text-yellow-300 p-2 rounded-md text-sm">
