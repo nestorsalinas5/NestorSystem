@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Page, Event, Client, Expense, User } from './types';
 import { getDashboardInsights } from './services/geminiService';
@@ -208,7 +209,7 @@ const App: React.FC = () => {
                     <form onSubmit={handleLogin}>
                         <div className="mb-4">
                             <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="email">Usuario</label>
-                            <input type="email" id="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
+                            <input type="text" id="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
                         </div>
                         <div className="mb-6">
                             <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="password">Contraseña</label>
