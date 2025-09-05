@@ -1,7 +1,3 @@
-
-
-
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Page, Event, Client, Expense, User } from './types';
 import { getDashboardInsights } from './services/geminiService';
@@ -192,14 +188,20 @@ const App: React.FC = () => {
             const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
             if (authError) {
                 console.error("Error fetching auth users:", authError);
-                setUsers(data as User[]);
+                // FIX: Added null check for data to prevent errors.
+                setUsers((data as User[]) || []);
             } else {
                 // FIX: Add explicit type 'any' to 'profile' to avoid type inference issue with empty arrays.
-                const usersWithEmails = data.map((profile: any) => {
-                    const authUser = authUsers.users.find(u => u.id === profile.id);
-                    return { ...profile, email: authUser?.email };
-                });
-                setUsers(usersWithEmails as User[]);
+                // FIX: Added checks for data and authUsers being non-null to prevent runtime errors.
+                if (data && authUsers) {
+                    const usersWithEmails = data.map((profile: any) => {
+                        const authUser = authUsers.users.find(u => u.id === profile.id);
+                        return { ...profile, email: authUser?.email };
+                    });
+                    setUsers(usersWithEmails as User[]);
+                } else {
+                    setUsers((data as User[]) || []);
+                }
             }
         }
     }, []);
