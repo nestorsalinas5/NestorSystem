@@ -59,7 +59,6 @@ const AuthScreen: React.FC = () => {
             // Now create the profile
             const { error: profileError } = await supabase.from('profiles').insert({
                 id: signUpData.user.id,
-                email: email,
                 company_name: companyName,
                 // Set a default activeUntil, e.g., one year from now
                 active_until: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString(),
@@ -155,7 +154,9 @@ const App: React.FC = () => {
             console.error('Error fetching user profile:', error);
             return null;
         }
-        return data as User;
+        // Also fetch email from auth user to display in admin panel
+        const { data: { user } } = await supabase.auth.getUser();
+        return { ...data, email: user?.email } as User;
     }, []);
     
     useEffect(() => {
@@ -186,9 +187,26 @@ const App: React.FC = () => {
 
 
     const fetchAdminData = useCallback(async () => {
+        // This is a simplified fetch. A real-world app would need to join with auth.users to get emails.
+        // For now, we assume the edge function or triggers keep email in sync if needed, or we fetch it separately.
         const { data, error } = await supabase.from('profiles').select('*');
-        if (error) console.error("Error fetching users:", error);
-        else setUsers(data as User[]);
+        if (error) {
+            console.error("Error fetching users:", error);
+        } else {
+            // This is inefficient, but will work for a small number of users.
+            // A better solution is a database function (RPC).
+            const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
+            if (authError) {
+                console.error("Error fetching auth users:", authError);
+                setUsers(data as User[]);
+            } else {
+                const usersWithEmails = data.map(profile => {
+                    const authUser = authUsers.users.find(u => u.id === profile.id);
+                    return { ...profile, email: authUser?.email };
+                });
+                setUsers(usersWithEmails as User[]);
+            }
+        }
     }, []);
 
     const fetchUserData = useCallback(async (userId: string) => {
@@ -271,8 +289,12 @@ const App: React.FC = () => {
             if (error) {
                 alert("Error actualizando perfil: " + error.message);
             } else {
-                setUsers(prev => prev.map(u => u.id === id ? user : u));
-                if (currentUser?.id === id) setCurrentUser(user);
+                await fetchAdminData(); // Refetch all users to get updated info
+                if (currentUser?.id === id) {
+                    // Refetch current user profile as well
+                    const updatedProfile = await fetchUserProfile(id);
+                    setCurrentUser(updatedProfile);
+                }
                  alert("Perfil actualizado exitosamente.");
             }
         }
@@ -429,8 +451,7 @@ const UserManagementPage: React.FC<{
 
     const handleOpenModal = (user: User | null) => {
         // For new user, create a blank slate object
-        // Fix: Explicitly type userToEdit as User to satisfy the type of setSelectedUser.
-        const userToEdit: User = user ? user : { id: '', email: '', role: 'user', status: 'active', activeUntil: '', companyName: '' };
+        const userToEdit: User = user ? { ...user } : { id: '', email: '', role: 'user', status: 'active', activeUntil: '', companyName: '' };
         setSelectedUser(userToEdit);
         setIsModalOpen(true);
     };
