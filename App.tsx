@@ -1,5 +1,6 @@
 
 
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Page, Event, Client, Expense, User } from './types';
 import { getDashboardInsights } from './services/geminiService';
@@ -178,15 +179,21 @@ const App: React.FC = () => {
     const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
     
     const saveEvent = async (event: Event) => {
-        const eventToSave = { ...event, user_id: currentUser!.id, expenses: event.expenses || [] };
-         if (!event.id) {
-            // New event, remove temporary id from expenses
-            // FIX: The original forEach with delete was causing a TypeScript error.
-            // Re-mapping expenses to remove the temporary 'id' field used for UI keys is safer.
-            (eventToSave as any).expenses = eventToSave.expenses.map(({ type, amount }) => ({ type, amount }));
-        }
+        // FIX: Refactored to solve a TypeScript error with `upsert` and fix a logic bug.
+        // The payload for the database needs to have temporary client-side `id`s on expenses removed.
+        // This should happen for both new and updated events.
+        const { id, expenses, ...rest } = event;
+
+        const payload = {
+            ...rest,
+            user_id: currentUser!.id,
+            expenses: (expenses || []).map(({ type, amount }) => ({ type, amount })),
+        };
         
-        const { data, error } = await supabase.from('events').upsert(eventToSave).select().single();
+        // Only include the `id` for updates. For inserts, `id` should be omitted so the DB generates it.
+        const upsertData = id ? { ...payload, id } : payload;
+        
+        const { data, error } = await supabase.from('events').upsert(upsertData).select().single();
         if (error) {
             alert("Error al guardar el evento: " + error.message);
         } else if (data) {
