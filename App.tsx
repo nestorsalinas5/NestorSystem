@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Page, Event, Client, Expense, User } from './types';
 import { getDashboardInsights } from './services/geminiService';
@@ -428,7 +429,8 @@ const UserManagementPage: React.FC<{
 
     const handleOpenModal = (user: User | null) => {
         // For new user, create a blank slate object
-        const userToEdit = user ? user : { id: '', email: '', role: 'user', status: 'active', activeUntil: '', companyName: '' };
+        // Fix: Explicitly type userToEdit as User to satisfy the type of setSelectedUser.
+        const userToEdit: User = user ? user : { id: '', email: '', role: 'user', status: 'active', activeUntil: '', companyName: '' };
         setSelectedUser(userToEdit);
         setIsModalOpen(true);
     };
