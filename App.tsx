@@ -440,9 +440,8 @@ const getBase64ImageFromUrl = (url: string): Promise<string | null> => {
 const generateBudgetPDF = async (budget: Budget, currentUser: User, client: Client | undefined) => {
     const doc = new jsPDF();
     const pageMargin = 15;
-    const cellPadding = 2;
     const headStyles = { fillColor: '#2563eb', textColor: '#ffffff', fontStyle: 'bold' as 'bold' };
-    
+
     // --- PDF Header ---
     const logoDataUrl = currentUser.companyLogoUrl ? await getBase64ImageFromUrl(currentUser.companyLogoUrl) : null;
     if (logoDataUrl) {
@@ -459,31 +458,29 @@ const generateBudgetPDF = async (budget: Budget, currentUser: User, client: Clie
     doc.setTextColor(100);
     doc.text(`Presupuesto / Cotización`, logoDataUrl ? pageMargin + 30 : pageMargin, 32);
 
-    // --- Client and Budget Info ---
-    doc.setFontSize(10);
-    doc.setDrawColor(200);
-    doc.line(pageMargin, 50, doc.internal.pageSize.width - pageMargin, 50);
-
-    doc.text("CLIENTE:", pageMargin, 58);
-    doc.setFont('helvetica', 'bold');
-    doc.text(client?.name || 'N/A', pageMargin, 63);
-    doc.setFont('helvetica', 'normal');
-    doc.text(client?.phone || '', pageMargin, 68);
-    doc.text(client?.email || '', pageMargin, 73);
-
-    const rightAlignX = doc.internal.pageSize.width - pageMargin;
-    doc.text("NÚMERO DE PRESUPUESTO:", rightAlignX, 58, { align: 'right' });
-    doc.text("FECHA DE EMISIÓN:", rightAlignX, 68, { align: 'right' });
-    doc.text("VÁLIDO HASTA:", rightAlignX, 73, { align: 'right' });
-
-    doc.setFont('helvetica', 'bold');
-    doc.text(budget.id.substring(0, 8).toUpperCase(), rightAlignX, 63, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text(new Date(budget.created_at).toLocaleDateString(), rightAlignX, 68, { align: 'right' });
-    doc.text(budget.valid_until ? new Date(budget.valid_until).toLocaleDateString() : 'N/A', rightAlignX, 73, { align: 'right' });
-
+    // --- Client and Budget Info (using a borderless table for alignment) ---
+    const clientInfo = `CLIENTE:\n${client?.name || 'N/A'}\n${client?.phone || ''}\n${client?.email || ''}`;
+    const budgetInfo = `NÚMERO DE PRESUPUESTO:\nFECHA DE EMISIÓN:\nVÁLIDO HASTA:`;
+    const budgetValues = `${budget.id.substring(0, 8).toUpperCase()}\n${new Date(budget.created_at).toLocaleDateString()}\n${budget.valid_until ? new Date(budget.valid_until).toLocaleDateString() : 'N/A'}`;
+        
+    autoTable(doc, {
+        startY: 50,
+        body: [[
+            { content: clientInfo, styles: { cellPadding: { top: 0, left: 0 } } },
+            { content: budgetInfo, styles: { halign: 'left', cellPadding: { top: 0, left: 0 } } },
+            { content: budgetValues, styles: { halign: 'right', cellPadding: { top: 0, right: 0 }, fontStyle: 'bold' } },
+        ]],
+        theme: 'plain',
+        styles: { fontSize: 9, font: 'helvetica' },
+        columnStyles: {
+            0: { cellWidth: 'auto' },
+            1: { cellWidth: 40 },
+            2: { cellWidth: 'auto' },
+        },
+    });
 
     // --- Items Table ---
+    const itemsTableStartY = (doc as any).lastAutoTable.finalY + 10;
     const subtotal = budget.items.reduce((acc, item) => acc + item.quantity * item.price, 0);
     const total = subtotal - budget.discount;
     
@@ -495,12 +492,12 @@ const generateBudgetPDF = async (budget: Budget, currentUser: User, client: Clie
     ]);
 
     autoTable(doc, {
-        startY: 85,
+        startY: itemsTableStartY,
         head: [['Descripción', 'Cantidad', 'Precio Unit.', 'Total']],
         body: tableBody,
         theme: 'grid',
         headStyles: headStyles,
-        styles: { fontSize: 9, cellPadding },
+        styles: { fontSize: 9, cellPadding: 2, font: 'helvetica' },
         columnStyles: {
             1: { halign: 'center' },
             2: { halign: 'right' },
@@ -511,18 +508,21 @@ const generateBudgetPDF = async (budget: Budget, currentUser: User, client: Clie
             const pageCount = (doc as any).internal.getNumberOfPages ? (doc as any).internal.getNumberOfPages() : 0;
             doc.setFontSize(8);
             doc.setTextColor(150);
-            doc.text(`Generado por GestionSystemDj`, data.settings.margin.left, doc.internal.pageSize.height - 10);
-            doc.text(`Página ${data.pageNumber} de ${pageCount}`, doc.internal.pageSize.width - data.settings.margin.right, doc.internal.pageSize.height - 10, { align: 'right' });
+            doc.text(`Generado por GestionSystemDj`, pageMargin, doc.internal.pageSize.height - 10);
+            doc.text(`Página ${data.pageNumber} de ${pageCount}`, doc.internal.pageSize.width - pageMargin, doc.internal.pageSize.height - 10, { align: 'right' });
         }
     });
 
     // --- Totals Section ---
     const finalY = (doc as any).lastAutoTable.finalY;
+    doc.setDrawColor(200); // Light gray line
+    doc.line(doc.internal.pageSize.width / 2, finalY + 8, doc.internal.pageSize.width - pageMargin, finalY + 8);
+
     autoTable(doc, {
         startY: finalY + 10,
         theme: 'plain',
         tableWidth: 'wrap',
-        margin: { left: doc.internal.pageSize.width - 80 - pageMargin },
+        margin: { left: doc.internal.pageSize.width / 2 },
         body: [
             ['Subtotal:', { content: formatGuarani(subtotal), styles: { halign: 'right' } }],
             ['Descuento:', { content: formatGuarani(budget.discount), styles: { halign: 'right' } }],
@@ -534,15 +534,19 @@ const generateBudgetPDF = async (budget: Budget, currentUser: User, client: Clie
                 styles: { fontStyle: 'bold', fontSize: 12, halign: 'right' }
             }],
         ],
-        styles: { fontSize: 10, cellPadding },
+        styles: { fontSize: 10, cellPadding: { top: 1.5, right: 0, bottom: 1.5, left: 2 } },
     });
 
     // --- Notes Section ---
+    const totalsFinalY = (doc as any).lastAutoTable.finalY;
     if (budget.notes) {
         doc.setFontSize(9);
         doc.setTextColor(120);
-        doc.text("Notas:", pageMargin, finalY + 15);
-        doc.text(doc.splitTextToSize(budget.notes, doc.internal.pageSize.width - 120), pageMargin, finalY + 20);
+        doc.setFont('helvetica', 'italic');
+        doc.text("Notas:", pageMargin, totalsFinalY + 15);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(100);
+        doc.text(doc.splitTextToSize(budget.notes, doc.internal.pageSize.width - (pageMargin * 2)), pageMargin, totalsFinalY + 20);
     }
     
     return doc;
@@ -710,8 +714,8 @@ const App: React.FC = () => {
     const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
     
     const saveEvent = async (event: Event) => {
-        const { client, id, ...eventData } = event;
-        const isNew = !id;
+        const isNew = !event.id;
+        const { id, client, ...eventData } = event;
 
         const payload = {
             ...eventData,
@@ -743,8 +747,8 @@ const App: React.FC = () => {
     };
 
     const saveClient = async (client: Client) => {
+        const isNew = !client.id;
         const { id, ...clientData } = client;
-        const isNew = !id;
         
         const payload = {
             ...clientData,
@@ -903,8 +907,8 @@ const App: React.FC = () => {
     }, [currentUser]);
     
     const saveBudget = async (budget: Budget) => {
+        const isNew = !budget.id;
         const { id, client, ...budgetData } = budget;
-        const isNew = !id;
 
         const payload = {
             ...budgetData,
