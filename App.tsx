@@ -91,7 +91,16 @@ const App: React.FC = () => {
             return null;
         }
         const { data: { user } } = await supabase.auth.getUser();
-        return { ...data, email: user?.email } as User;
+        
+        // Map snake_case from DB to camelCase for the app
+        const profileData = data as any;
+        return { 
+            ...profileData, 
+            activeUntil: profileData.active_until,
+            company_name: profileData.company_name,
+            companyLogoUrl: profileData.company_logo_url,
+            email: user?.email 
+        } as User;
     }, []);
     
     useEffect(() => {
@@ -131,20 +140,26 @@ const App: React.FC = () => {
         const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
         if (authError) {
             console.error("Error fetching auth users:", authError);
-            setUsers(data as User[] || []);
+            // FIX: Added return to prevent execution when there is an authError.
+            // This prevents a TypeScript error where `authUsers.users` would be `never[]`.
             return;
         }
+        
+        const profiles = data || [];
+        
+        // FIX: Map snake_case `active_until` from the database to camelCase `activeUntil` for the app state.
+        // This solves the "Invalid Date" and "Cannot read properties of undefined (reading 'split')" errors.
+        const mappedUsers = profiles.map((profile: any) => {
+            const authUser = authUsers?.users.find(u => u.id === profile.id);
+            return {
+                ...profile,
+                activeUntil: profile.active_until, // MAPPING a camelCase
+                email: authUser?.email || profile.email,
+            };
+        });
+        
+        setUsers(mappedUsers as User[]);
 
-        if (data && authUsers?.users) {
-            // FIX: Explicitly type the 'profile' parameter to help TypeScript's inference.
-            const usersWithEmails = (data as User[]).map((profile: User) => {
-                const authUser = authUsers.users.find(u => u.id === profile.id);
-                return { ...profile, email: authUser?.email };
-            });
-            setUsers(usersWithEmails);
-        } else {
-            setUsers(data as User[] || []);
-        }
     }, []);
 
     const fetchUserData = useCallback(async (userId: string) => {
@@ -179,9 +194,6 @@ const App: React.FC = () => {
     const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
     
     const saveEvent = async (event: Event) => {
-        // FIX: Refactored to solve a TypeScript error with `upsert` and fix a logic bug.
-        // The payload for the database needs to have temporary client-side `id`s on expenses removed.
-        // This should happen for both new and updated events.
         const { id, expenses, ...rest } = event;
 
         const payload = {
@@ -190,7 +202,6 @@ const App: React.FC = () => {
             expenses: (expenses || []).map(({ type, amount }) => ({ type, amount })),
         };
         
-        // Only include the `id` for updates. For inserts, `id` should be omitted so the DB generates it.
         const upsertData = id ? { ...payload, id } : payload;
         
         const { data, error } = await supabase.from('events').upsert(upsertData).select().single();
@@ -210,13 +221,14 @@ const App: React.FC = () => {
     };
 
     const saveUser = async (user: User, password?: string) => {
-        if (!user.id) {
+        if (!user.id) { // New user
             if (!user.email || !password || !user.company_name || !user.activeUntil) {
                 alert("Todos los campos son requeridos para crear un usuario.");
                 return;
             }
 
             const { error } = await supabase.functions.invoke('create-user', {
+                // The edge function expects camelCase
                 body: { 
                     email: user.email, 
                     password: password,
@@ -232,15 +244,24 @@ const App: React.FC = () => {
                 await fetchAdminData();
             }
 
-        } else { 
-            const { id, email, ...updateData } = user;
-            const { error } = await supabase.from('profiles').update(updateData).eq('id', id);
+        } else { // Existing user
+            // Prepare data for DB (snake_case)
+            const updateData = {
+                role: user.role,
+                status: user.status,
+                active_until: user.activeUntil,
+                company_name: user.company_name,
+                company_logo_url: user.companyLogoUrl,
+            };
+
+            const { error } = await supabase.from('profiles').update(updateData).eq('id', user.id);
+            
             if (error) {
                 alert("Error actualizando perfil: " + error.message);
             } else {
                 await fetchAdminData();
-                if (currentUser?.id === id) {
-                    const updatedProfile = await fetchUserProfile(id);
+                if (currentUser?.id === user.id) {
+                    const updatedProfile = await fetchUserProfile(user.id);
                     setCurrentUser(updatedProfile);
                 }
                  alert("Perfil actualizado exitosamente.");
@@ -515,7 +536,7 @@ const UserManagementPage: React.FC<{
                                         {user.status === 'active' ? 'Activo' : 'Inactivo'}
                                     </span>
                                 </td>
-                                <td className="p-2">{new Date(user.activeUntil).toLocaleDateString()}</td>
+                                <td className="p-2">{user.activeUntil ? new Date(user.activeUntil).toLocaleDateString() : 'N/A'}</td>
                                 <td className="p-2">
                                     <button onClick={() => handleOpenModal(user)} className="text-primary-600 hover:underline">Editar</button>
                                 </td>
@@ -577,7 +598,7 @@ const UserFormModal: React.FC<{
                         </div>
                         <div>
                              <label className="block mb-2">Activo Hasta</label>
-                             <input type="date" name="activeUntil" value={formData.activeUntil.split('T')[0]} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
+                             <input type="date" name="activeUntil" value={formData.activeUntil?.split('T')[0] || ''} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
                         </div>
                     </div>
                     <div className="flex justify-end space-x-4 mt-8">
@@ -668,7 +689,6 @@ const EventFormModal: React.FC<{
         location: event?.location || '',
         date: event?.date ? new Date(event.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         amount_charged: event?.amount_charged || 0,
-        // FIX: Ensure expenses from DB have a temporary client-side ID for list keys and editing.
         expenses: (event?.expenses || []).map((exp, index) => ({
             ...exp,
             id: (exp as any).id || `temp-${Date.now()}-${index}`,
@@ -688,13 +708,9 @@ const EventFormModal: React.FC<{
         setFormData(prev => ({ ...prev, client: { ...prev.client, [name]: value } }));
     };
     
-    // FIX: Changed `value` type from `string | number` to `string` to match call-site (`e.target.value`)
-    // and fix type error when assigning to a string property.
     const handleExpenseChange = (index: number, field: 'type' | 'amount', value: string) => {
         const newExpenses = [...formData.expenses];
         const currentExpense = newExpenses[index];
-        // FIX: Replaced usage of computed property name `[field]` to prevent TypeScript from inferring a `never` type.
-        // By explicitly setting `amount` or `type`, we ensure type safety.
         if (field === 'amount') {
              newExpenses[index] = { ...currentExpense, amount: Number(value) };
         } else {
