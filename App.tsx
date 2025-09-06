@@ -142,33 +142,24 @@ const App: React.FC = () => {
 
 
     const fetchAdminData = useCallback(async () => {
-        const { data, error } = await supabase.from('profiles').select('*');
+        const { data, error } = await supabase.functions.invoke('get-all-users');
+
         if (error) {
-            console.error("Error fetching users:", error);
+            console.error("Error fetching users via Edge Function:", error);
             alert(`Error al cargar la lista de usuarios: ${error.message}`);
             return;
         }
-        
-        const { data: { users: authUsers }, error: authError } = await supabase.auth.admin.listUsers();
-        if (authError) {
-            console.error("Error fetching auth users:", authError);
-            alert(`Error al cargar datos de autenticación: ${authError.message}`);
-            return;
-        }
-        
-        const profiles = data || [];
-        
-        const mappedUsers = profiles.map((profile: any) => {
-            const authUser = authUsers?.find(u => u.id === profile.id);
-            return {
-                ...profile,
-                activeUntil: profile.active_until, 
-                email: authUser?.email || 'N/A',
-            };
-        });
-        
-        setUsers(mappedUsers as User[]);
 
+        // The Edge Function already combines the data for us.
+        // We just need to map the snake_case properties for consistency within the app.
+        const mappedUsers = (data as any[]).map(user => ({
+            ...user,
+            activeUntil: user.active_until,
+            company_name: user.company_name,
+            companyLogoUrl: user.company_logo_url
+        }));
+
+        setUsers(mappedUsers as User[]);
     }, []);
 
     const fetchUserData = useCallback(async (userId: string) => {
