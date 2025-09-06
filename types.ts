@@ -32,7 +32,7 @@ export interface User {
   role: UserRole;
   status: UserStatus;
   activeUntil: string; // ISO string
-  companyName: string;
+  company_name: string;
   companyLogoUrl?: string; // URL from Supabase Storage
 }
 
