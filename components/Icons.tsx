@@ -1,4 +1,3 @@
-
 import React from 'react';
 
 const iconProps = {
@@ -48,6 +47,15 @@ export const AgendaIcon = () => (
         <path d="M16 2v4" />
         <rect width="18" height="18" x="3" y="4" rx="2" />
         <path d="M3 10h18" />
+    </svg>
+);
+
+export const BudgetIcon = () => (
+    <svg {...iconProps} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+        <path d="M10 13a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1v-6z" />
+        <path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-4" />
+        <path d="M9 3a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2V3z" />
+        <path d="M14 8h-4" />
     </svg>
 );
 
