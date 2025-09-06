@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry } from './types';
 import { getDashboardInsights } from './services/geminiService';
@@ -603,6 +604,10 @@ const App: React.FC = () => {
     const [budgets, setBudgets] = useState<Budget[]>([]);
     const [inquiries, setInquiries] = useState<Inquiry[]>([]);
 
+    // State for budget modal to enable cross-component actions
+    const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
+    const [selectedBudget, setSelectedBudget] = useState<Budget | null>(null);
+
 
     const showAlert = (message: string, type: 'success' | 'error' = 'error') => {
         setAlertState({ isOpen: true, message, type });
@@ -1009,6 +1014,41 @@ const App: React.FC = () => {
         }
     };
     
+    const convertInquiryToBudget = async (inquiry: Inquiry) => {
+        let client = clients.find(c => c.email && c.email === inquiry.client_email && inquiry.client_email !== '');
+        
+        if (!client) {
+            const newClient = await saveClient({
+                id: '',
+                user_id: currentUser!.id,
+                name: inquiry.client_name,
+                phone: inquiry.client_phone || '',
+                email: inquiry.client_email || ''
+            });
+            if (!newClient) {
+                showAlert("No se pudo crear el cliente desde la consulta.", "error");
+                return;
+            }
+            client = newClient;
+        }
+
+        const newBudget: Budget = {
+            id: '', 
+            user_id: currentUser!.id,
+            client_id: client.id,
+            title: inquiry.event_type || `Presupuesto para ${client.name}`,
+            status: 'Borrador',
+            items: [{ id: Math.random().toString(), description: inquiry.event_type || 'Servicio de DJ', quantity: 1, price: 0 }],
+            discount: 0,
+            notes: inquiry.message || '',
+            created_at: new Date().toISOString()
+        };
+        
+        setSelectedBudget(newBudget);
+        setIsBudgetModalOpen(true);
+        setCurrentPage('budgets');
+    };
+
     if (loading) {
         return <div className="h-screen w-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200">Cargando...</div>;
     }
@@ -1062,6 +1102,11 @@ const App: React.FC = () => {
                             toggleAnnouncementActive={toggleAnnouncementActive}
                             sendNotificationToAll={sendNotificationToAll}
                             fetchInquiries={fetchInquiries}
+                            convertInquiryToBudget={convertInquiryToBudget}
+                            isBudgetModalOpen={isBudgetModalOpen}
+                            setIsBudgetModalOpen={setIsBudgetModalOpen}
+                            selectedBudget={selectedBudget}
+                            setSelectedBudget={setSelectedBudget}
                         />
                     </main>
                     {isAnnouncementModalOpen && activeAnnouncement && (
@@ -1105,6 +1150,11 @@ const PageContent: React.FC<{
     toggleAnnouncementActive: (announcement: Announcement) => Promise<void>;
     sendNotificationToAll: (message: string) => Promise<void>;
     fetchInquiries: (userId: string) => Promise<void>;
+    convertInquiryToBudget: (inquiry: Inquiry) => Promise<void>;
+    isBudgetModalOpen: boolean;
+    setIsBudgetModalOpen: (isOpen: boolean) => void;
+    selectedBudget: Budget | null;
+    setSelectedBudget: (budget: Budget | null) => void;
 }> = (props) => {
     switch (props.currentPage) {
         case 'dashboard':
@@ -1112,17 +1162,26 @@ const PageContent: React.FC<{
                 ? <DashboardAdmin users={props.users} /> 
                 : <DashboardUser events={props.events} />;
         case 'inquiries':
+            // FIX: Pass currentUser prop to InquiriesPage to avoid incorrect async state handling.
             return <InquiriesPage 
-                        inquiries={props.inquiries} 
-                        currentUser={props.currentUser} 
-                        clients={props.clients}
-                        saveClient={props.saveClient}
-                        setCurrentPage={props.setCurrentPage}
-                        showAlert={props.showAlert}
-                        fetchInquiries={props.fetchInquiries}
+                        inquiries={props.inquiries}
+                        convertInquiryToBudget={props.convertInquiryToBudget}
+                        fetchInquiries={() => props.fetchInquiries(props.currentUser.id)}
+                        currentUser={props.currentUser}
                     />;
         case 'budgets':
-            return <BudgetsPage budgets={props.budgets} clients={props.clients} currentUser={props.currentUser} saveBudget={props.saveBudget} deleteBudget={props.deleteBudget} showAlert={props.showAlert} />;
+            return <BudgetsPage 
+                        budgets={props.budgets} 
+                        clients={props.clients} 
+                        currentUser={props.currentUser} 
+                        saveBudget={props.saveBudget} 
+                        deleteBudget={props.deleteBudget} 
+                        showAlert={props.showAlert}
+                        isModalOpen={props.isBudgetModalOpen}
+                        setIsModalOpen={props.setIsBudgetModalOpen}
+                        selectedBudget={props.selectedBudget}
+                        setSelectedBudget={props.setSelectedBudget}
+                    />;
         case 'events':
             return <EventsPage events={props.events} clients={props.clients} saveEvent={props.saveEvent} deleteEvent={props.deleteEvent} />;
         case 'clients':
@@ -1878,9 +1937,12 @@ const BudgetsPage: React.FC<{
     saveBudget: (budget: Budget) => Promise<void>;
     deleteBudget: (id: string) => Promise<void>;
     showAlert: (message: string, type: 'success' | 'error') => void;
-}> = ({ budgets, clients, currentUser, saveBudget, deleteBudget, showAlert }) => {
-    const [isModalOpen, setIsModalOpen] = useState(false);
-    const [selectedBudget, setSelectedBudget] = useState<Budget | null>(null);
+    isModalOpen: boolean;
+    setIsModalOpen: (isOpen: boolean) => void;
+    selectedBudget: Budget | null;
+    setSelectedBudget: (budget: Budget | null) => void;
+}> = ({ budgets, clients, currentUser, saveBudget, deleteBudget, showAlert, isModalOpen, setIsModalOpen, selectedBudget, setSelectedBudget }) => {
+
     const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
     const [budgetToSend, setBudgetToSend] = useState<Budget | null>(null);
 
@@ -1900,9 +1962,22 @@ const BudgetsPage: React.FC<{
     };
     
     const handleViewPdf = async (budget: Budget) => {
-        const client = clients.find(c => c.id === budget.client_id);
-        const doc = await generateBudgetPDF(budget, currentUser, client);
-        window.open(doc.output('bloburl'), '_blank');
+        const newTab = window.open('', '_blank');
+        if (!newTab) {
+            showAlert("Por favor, permite las ventanas emergentes para ver el PDF.", "error");
+            return;
+        }
+        newTab.document.write('Generando PDF, por favor espera...');
+        try {
+            const client = clients.find(c => c.id === budget.client_id);
+            const doc = await generateBudgetPDF(budget, currentUser, client);
+            // FIX: Convert URL object to string for assignment to href.
+            newTab.location.href = doc.output('bloburl').toString();
+        } catch (e) {
+            console.error("PDF generation failed:", e);
+            newTab.document.write('Ocurrió un error al generar el PDF.');
+            showAlert("Ocurrió un error al generar el PDF.", "error");
+        }
     };
 
     return (
@@ -1958,7 +2033,7 @@ const BudgetFormModal: React.FC<{
     onSave: (budget: Budget) => void;
     onClose: () => void;
 }> = ({ budget, clients, onSave, onClose }) => {
-    const isNew = !budget;
+    const isNew = !budget?.id;
     const initialBudget: Budget = useMemo(() => {
         return budget || {
             id: '', user_id: '', client_id: clients[0]?.id || '', title: '', status: 'Borrador',
@@ -2130,44 +2205,22 @@ const EmailBudgetModal: React.FC<{
 
 const InquiriesPage: React.FC<{
     inquiries: Inquiry[];
+    fetchInquiries: () => Promise<void>;
+    convertInquiryToBudget: (inquiry: Inquiry) => Promise<void>;
+    // FIX: Add currentUser to props to get user ID from the parent component.
     currentUser: User;
-    clients: Client[];
-    saveClient: (client: Client) => Promise<Client | null>;
-    setCurrentPage: (page: Page) => void;
-    showAlert: (message: string, type: 'success' | 'error') => void;
-    fetchInquiries: (userId: string) => Promise<void>;
-}> = ({ inquiries, currentUser, clients, saveClient, setCurrentPage, showAlert, fetchInquiries }) => {
+}> = ({ inquiries, fetchInquiries, convertInquiryToBudget, currentUser }) => {
     
+    // FIX: Use currentUser prop instead of trying to fetch it asynchronously here. This resolves the property 'data' does not exist on Promise error.
     const publicLink = `${window.location.origin}${window.location.pathname}#/inquiry/${currentUser.id}`;
     const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(publicLink)}`;
-
-    const handleConvertToBudget = async (inquiry: Inquiry) => {
-        let client = clients.find(c => c.email && c.email === inquiry.client_email);
-        if (!client) {
-            const newClient = await saveClient({
-                id: '',
-                user_id: currentUser.id,
-                name: inquiry.client_name,
-                phone: inquiry.client_phone || '',
-                email: inquiry.client_email || ''
-            });
-            if (!newClient) {
-                showAlert("No se pudo crear un nuevo cliente a partir de la consulta.", "error");
-                return;
-            }
-            client = newClient;
-        }
-        
-        showAlert("Cliente encontrado/creado. Por favor, crea un presupuesto para ellos.", "success");
-        setCurrentPage('budgets');
-    };
 
     const updateInquiryStatus = async (inquiryId: string, status: Inquiry['status']) => {
         const { error } = await supabase.from('inquiries').update({ status }).eq('id', inquiryId);
         if (error) {
-            showAlert("Error al actualizar estado: " + error.message, 'error');
+            alert("Error al actualizar estado: " + error.message);
         } else {
-            await fetchInquiries(currentUser.id);
+            await fetchInquiries();
         }
     };
     
@@ -2217,7 +2270,7 @@ const InquiriesPage: React.FC<{
                                     </td>
                                     <td className="p-2">
                                         <button 
-                                            onClick={() => handleConvertToBudget(inquiry)} 
+                                            onClick={() => convertInquiryToBudget(inquiry)} 
                                             className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 text-sm font-semibold"
                                         >
                                             Convertir a Presupuesto
