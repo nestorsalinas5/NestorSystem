@@ -1,12 +1,11 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus } from './types';
+import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry } from './types';
 import { getDashboardInsights } from './services/geminiService';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, PdfIcon, EditIcon, EmailIcon } from './components/Icons.tsx';
+import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, PdfIcon, EditIcon, EmailIcon, InquiryIcon } from './components/Icons.tsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { createClient, AuthSession, User as SupabaseUser } from '@supabase/supabase-js';
+import { createClient, AuthSession } from '@supabase/supabase-js';
 
 // --- SUPABASE CLIENT ---
 const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL;
@@ -109,6 +108,7 @@ const Sidebar: React.FC<{
             );
         } else {
              items.push(
+                { page: 'inquiries', label: 'Consultas', icon: <InquiryIcon /> },
                 { page: 'budgets', label: 'Presupuestos', icon: <BudgetIcon /> },
                 { page: 'events', label: 'Eventos', icon: <EventsIcon /> },
                 { page: 'clients', label: 'Clientes', icon: <ClientsIcon /> },
@@ -554,6 +554,27 @@ const generateBudgetPDF = async (budget: Budget, currentUser: User, client: Clie
 };
 
 
+// Main App Component / Router
+const AppContainer: React.FC = () => {
+    const [path, setPath] = useState(window.location.pathname);
+    
+    useEffect(() => {
+        const onLocationChange = () => setPath(window.location.pathname);
+        window.addEventListener('popstate', onLocationChange);
+        return () => window.removeEventListener('popstate', onLocationChange);
+    }, []);
+
+    if (path.startsWith('/inquiry/')) {
+        const userId = path.split('/')[2];
+        if (userId) {
+            return <PublicInquiryPage userId={userId} />;
+        }
+    }
+    
+    return <App />;
+}
+
+
 // Main App Component
 const App: React.FC = () => {
     const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') as 'light' | 'dark') || 'light');
@@ -578,6 +599,7 @@ const App: React.FC = () => {
     const [events, setEvents] = useState<Event[]>([]); 
     const [clients, setClients] = useState<Client[]>([]);
     const [budgets, setBudgets] = useState<Budget[]>([]);
+    const [inquiries, setInquiries] = useState<Inquiry[]>([]);
 
 
     const showAlert = (message: string, type: 'success' | 'error' = 'error') => {
@@ -671,6 +693,12 @@ const App: React.FC = () => {
         if (error) showAlert("Error al cargar los presupuestos: " + error.message, 'error');
         else setBudgets(data as Budget[] || []);
     }, []);
+    
+    const fetchInquiries = useCallback(async (userId: string) => {
+        const { data, error } = await supabase.from('inquiries').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+        if (error) showAlert("Error al cargar las consultas: " + error.message, 'error');
+        else setInquiries(data as Inquiry[] || []);
+    }, []);
 
     const fetchUserData = useCallback(async (userId: string) => {
         // Events
@@ -706,11 +734,12 @@ const App: React.FC = () => {
                 await fetchUserData(currentUser.id);
                 await fetchClients(currentUser.id);
                 await fetchBudgets(currentUser.id);
+                await fetchInquiries(currentUser.id);
             }
             setLoading(false);
         };
         fetchData();
-    }, [currentUser, fetchAdminData, fetchUserData, fetchClients, fetchBudgets]);
+    }, [currentUser, fetchAdminData, fetchUserData, fetchClients, fetchBudgets, fetchInquiries]);
 
     const handleLogout = async () => {
         sessionStorage.clear(); // Clear session storage on logout
@@ -733,12 +762,12 @@ const App: React.FC = () => {
             expenses: event.expenses.map(({ id: expenseId, ...rest }) => rest),
             observations: event.observations,
         };
+        
+        if (!isNew) {
+            payload.id = event.id;
+        }
 
-        const query = isNew
-            ? supabase.from('events').insert(payload)
-            : supabase.from('events').update(payload).eq('id', event.id);
-
-        const { error } = await query;
+        const { error } = await supabase.from('events').upsert(payload);
 
         if (error) {
             showAlert('Error al guardar el evento: ' + error.message, 'error');
@@ -774,7 +803,7 @@ const App: React.FC = () => {
         }
     };
 
-    const saveClient = async (client: Client) => {
+    const saveClient = async (client: Client): Promise<Client | null> => {
         const isNew = !client.id;
         
         const payload: any = {
@@ -784,14 +813,15 @@ const App: React.FC = () => {
             email: client.email,
         };
         
-        const query = isNew
-            ? supabase.from('clients').insert(payload)
-            : supabase.from('clients').update(payload).eq('id', client.id);
-
-        const { error } = await query;
+        if (!isNew) {
+            payload.id = client.id;
+        }
+        
+        const { data, error } = await supabase.from('clients').upsert(payload).select().single();
 
         if (error) {
             showAlert('Error al guardar el cliente: ' + error.message, 'error');
+            return null;
         } else {
             showAlert('Cliente guardado exitosamente.', 'success');
             if (isNew && client.email) {
@@ -800,6 +830,7 @@ const App: React.FC = () => {
                 });
             }
             await fetchClients(currentUser!.id);
+            return data as Client;
         }
     };
     
@@ -950,12 +981,12 @@ const App: React.FC = () => {
             notes: budget.notes,
             valid_until: budget.valid_until,
         };
-        
-        const query = isNew
-            ? supabase.from('budgets').insert(payload)
-            : supabase.from('budgets').update(payload).eq('id', budget.id);
 
-        const { error } = await query;
+        if (!isNew) {
+            payload.id = budget.id;
+        }
+        
+        const { error } = await supabase.from('budgets').upsert(payload);
 
         if (error) {
             showAlert('Error al guardar el presupuesto: ' + error.message, 'error');
@@ -1007,10 +1038,12 @@ const App: React.FC = () => {
                         />
                         <PageContent
                             currentPage={currentPage}
+                            setCurrentPage={setCurrentPage}
                             currentUser={currentUser}
                             events={events}
                             clients={clients}
                             budgets={budgets}
+                            inquiries={inquiries}
                             saveEvent={saveEvent}
                             deleteEvent={deleteEvent}
                             saveClient={saveClient}
@@ -1026,6 +1059,7 @@ const App: React.FC = () => {
                             deleteAnnouncement={deleteAnnouncement}
                             toggleAnnouncementActive={toggleAnnouncementActive}
                             sendNotificationToAll={sendNotificationToAll}
+                            fetchInquiries={fetchInquiries}
                         />
                     </main>
                     {isAnnouncementModalOpen && activeAnnouncement && (
@@ -1047,13 +1081,15 @@ const App: React.FC = () => {
 
 const PageContent: React.FC<{
     currentPage: Page;
+    setCurrentPage: (page: Page) => void;
     currentUser: User;
     events: Event[];
     clients: Client[];
     budgets: Budget[];
+    inquiries: Inquiry[];
     saveEvent: (event: Event) => Promise<void>;
     deleteEvent: (id: string) => Promise<void>;
-    saveClient: (client: Client) => Promise<void>;
+    saveClient: (client: Client) => Promise<Client | null>;
     deleteClient: (id: string) => Promise<void>;
     saveBudget: (budget: Budget) => Promise<void>;
     deleteBudget: (id: string) => Promise<void>;
@@ -1066,12 +1102,23 @@ const PageContent: React.FC<{
     deleteAnnouncement: (id: string) => Promise<void>;
     toggleAnnouncementActive: (announcement: Announcement) => Promise<void>;
     sendNotificationToAll: (message: string) => Promise<void>;
+    fetchInquiries: (userId: string) => Promise<void>;
 }> = (props) => {
     switch (props.currentPage) {
         case 'dashboard':
             return props.currentUser.role === 'admin' 
                 ? <DashboardAdmin users={props.users} /> 
                 : <DashboardUser events={props.events} />;
+        case 'inquiries':
+            return <InquiriesPage 
+                        inquiries={props.inquiries} 
+                        currentUser={props.currentUser} 
+                        clients={props.clients}
+                        saveClient={props.saveClient}
+                        setCurrentPage={props.setCurrentPage}
+                        showAlert={props.showAlert}
+                        fetchInquiries={props.fetchInquiries}
+                    />;
         case 'budgets':
             return <BudgetsPage budgets={props.budgets} clients={props.clients} currentUser={props.currentUser} saveBudget={props.saveBudget} deleteBudget={props.deleteBudget} showAlert={props.showAlert} />;
         case 'events':
@@ -1441,7 +1488,7 @@ const EventFormModal: React.FC<{event: Event | null, clients: Client[], onSave: 
         </div>
     );
 };
-const ClientsPage: React.FC<{ clients: Client[], saveClient: (client: Client) => Promise<void>, deleteClient: (id: string) => Promise<void>}> = ({ clients, saveClient, deleteClient }) => {
+const ClientsPage: React.FC<{ clients: Client[], saveClient: (client: Client) => Promise<Client | null>, deleteClient: (id: string) => Promise<void>}> = ({ clients, saveClient, deleteClient }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedClient, setSelectedClient] = useState<Client | null>(null);
 
@@ -2064,4 +2111,184 @@ const EmailBudgetModal: React.FC<{
     );
 }
 
-export default App;
+// ---- NEW INQUIRY COMPONENTS ----
+
+const InquiriesPage: React.FC<{
+    inquiries: Inquiry[];
+    currentUser: User;
+    clients: Client[];
+    saveClient: (client: Client) => Promise<Client | null>;
+    setCurrentPage: (page: Page) => void;
+    showAlert: (message: string, type: 'success' | 'error') => void;
+    fetchInquiries: (userId: string) => Promise<void>;
+}> = ({ inquiries, currentUser, clients, saveClient, setCurrentPage, showAlert, fetchInquiries }) => {
+    
+    const publicLink = `${window.location.origin}/inquiry/${currentUser.id}`;
+    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(publicLink)}`;
+
+    const handleConvertToBudget = async (inquiry: Inquiry) => {
+        // This is a simplified conversion. A real app might have a more complex flow.
+        let client = clients.find(c => c.email && c.email === inquiry.client_email);
+        if (!client) {
+            const newClient = await saveClient({
+                id: '',
+                user_id: currentUser.id,
+                name: inquiry.client_name,
+                phone: inquiry.client_phone || '',
+                email: inquiry.client_email || ''
+            });
+            if (!newClient) {
+                showAlert("No se pudo crear un nuevo cliente a partir de la consulta.", "error");
+                return;
+            }
+            client = newClient;
+        }
+        
+        // For simplicity, we navigate to budgets page. A better UX would be to open the modal pre-filled.
+        // This would require lifting budget modal state to the main App component.
+        showAlert("Cliente encontrado/creado. Por favor, crea un presupuesto para ellos.", "success");
+        setCurrentPage('budgets');
+    };
+
+    const updateInquiryStatus = async (inquiryId: string, status: Inquiry['status']) => {
+        const { error } = await supabase.from('inquiries').update({ status }).eq('id', inquiryId);
+        if (error) {
+            showAlert("Error al actualizar estado: " + error.message, 'error');
+        } else {
+            await fetchInquiries(currentUser.id);
+        }
+    };
+    
+    return (
+        <div className="space-y-6">
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                <h3 className="text-xl font-semibold mb-4">Tu Formulario de Consultas</h3>
+                <p className="mb-4 text-gray-600 dark:text-gray-300">Comparte este link o código QR con tus clientes potenciales para que puedan solicitar tus servicios fácilmente.</p>
+                <div className="flex flex-wrap items-center gap-6">
+                    <div className="flex-1">
+                        <label className="block text-sm font-medium mb-1">Link Público</label>
+                        <input type="text" readOnly value={publicLink} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
+                    </div>
+                    <div>
+                        <img src={qrCodeUrl} alt="QR Code" className="rounded-lg" />
+                    </div>
+                </div>
+            </div>
+
+            <div className="bg-white dark:bg-gray-800 p-4 md:p-6 rounded-lg shadow">
+                <h3 className="text-xl font-semibold mb-4">Consultas Recibidas</h3>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                        <thead>
+                            <tr className="border-b dark:border-gray-700">
+                                <th className="p-2">Cliente</th><th className="p-2">Fecha Evento</th><th className="p-2">Estado</th><th className="p-2">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {inquiries.map(inquiry => (
+                                <tr key={inquiry.id} className="border-b dark:border-gray-700">
+                                    <td className="p-2">{inquiry.client_name}</td>
+                                    <td className="p-2">{inquiry.event_date ? new Date(inquiry.event_date).toLocaleDateString() : 'N/A'}</td>
+                                    <td className="p-2">
+                                        <select value={inquiry.status} onChange={(e) => updateInquiryStatus(inquiry.id, e.target.value as Inquiry['status'])} className="p-1 border rounded dark:bg-gray-700 dark:border-gray-600">
+                                            <option>Nueva</option>
+                                            <option>Contactado</option>
+                                            <option>Presupuesto Enviado</option>
+                                        </select>
+                                    </td>
+                                    <td className="p-2">
+                                        <button onClick={() => handleConvertToBudget(inquiry)} className="text-primary-600 hover:underline">Convertir a Presupuesto</button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const PublicInquiryPage: React.FC<{ userId: string }> = ({ userId }) => {
+    const [djProfile, setDjProfile] = useState<{ company_name: string, companyLogoUrl?: string } | null>(null);
+    const [formData, setFormData] = useState({ clientName: '', clientEmail: '', clientPhone: '', eventType: '', eventDate: '', message: '' });
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [success, setSuccess] = useState(false);
+
+    useEffect(() => {
+        const fetchDjProfile = async () => {
+            const { data, error } = await supabase.from('profiles').select('company_name, companyLogoUrl').eq('id', userId).single();
+            if (error || !data) {
+                setError("No se pudo encontrar el perfil del proveedor.");
+            } else {
+                setDjProfile(data);
+            }
+            setLoading(false);
+        };
+        fetchDjProfile();
+    }, [userId]);
+    
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    };
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        const { error } = await supabase.functions.invoke('submit-inquiry', {
+            body: { userId, ...formData }
+        });
+        if (error) {
+            setError("Hubo un error al enviar tu consulta. Por favor, intenta de nuevo.");
+        } else {
+            setSuccess(true);
+        }
+        setLoading(false);
+    };
+
+    if (loading && !djProfile) return <div className="min-h-screen flex items-center justify-center">Cargando...</div>;
+    if (error) return <div className="min-h-screen flex items-center justify-center text-red-500">{error}</div>;
+
+    if (success) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900 text-center p-4">
+                 <div className="p-8 bg-white dark:bg-gray-800 rounded-lg shadow-md w-full max-w-lg">
+                    <SuccessIcon />
+                    <h1 className="text-2xl font-bold my-4">¡Consulta Enviada!</h1>
+                    <p>Gracias por tu interés. {djProfile?.company_name} se pondrá en contacto contigo a la brevedad.</p>
+                 </div>
+            </div>
+        )
+    }
+
+    return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900 p-4">
+            <div className="p-8 bg-white dark:bg-gray-800 rounded-lg shadow-md w-full max-w-lg">
+                <div className="text-center mb-6">
+                    {djProfile?.companyLogoUrl && <img src={djProfile.companyLogoUrl} alt="Logo" className="w-20 h-20 rounded-full mx-auto mb-4 object-cover" />}
+                    <h1 className="text-2xl font-bold">Contacta a {djProfile?.company_name}</h1>
+                    <p className="text-gray-500">Completa el formulario para solicitar un presupuesto.</p>
+                </div>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <input type="text" name="clientName" placeholder="Tu Nombre Completo" onChange={handleChange} required className="w-full p-2 border rounded" />
+                    <input type="email" name="clientEmail" placeholder="Tu Email" onChange={handleChange} required className="w-full p-2 border rounded" />
+                    <input type="tel" name="clientPhone" placeholder="Tu Teléfono" onChange={handleChange} className="w-full p-2 border rounded" />
+                    <input type="text" name="eventType" placeholder="Tipo de Evento (Ej: Boda, Cumpleaños)" onChange={handleChange} className="w-full p-2 border rounded" />
+                    <div>
+                        <label className="text-sm text-gray-500">Fecha del Evento (Opcional)</label>
+                        <input type="date" name="eventDate" onChange={handleChange} className="w-full p-2 border rounded" />
+                    </div>
+                    <textarea name="message" placeholder="Cuéntanos más sobre tu evento..." rows={4} onChange={handleChange} className="w-full p-2 border rounded" />
+                    <button type="submit" disabled={loading} className="w-full bg-primary-600 text-white py-2 rounded-lg hover:bg-primary-700 disabled:bg-primary-300">
+                        {loading ? 'Enviando...' : 'Enviar Consulta'}
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+
+// Router in index.tsx is better, but this works for this environment
+export default AppContainer;
