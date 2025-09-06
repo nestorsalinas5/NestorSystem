@@ -556,12 +556,14 @@ const generateBudgetPDF = async (budget: Budget, currentUser: User, client: Clie
 
 // Main App Component / Router
 const AppContainer: React.FC = () => {
-    const [path, setPath] = useState(window.location.pathname);
-    
+    // Get path from hash, fallback to empty string
+    const getPathFromHash = () => window.location.hash.substring(1); 
+    const [path, setPath] = useState(getPathFromHash());
+
     useEffect(() => {
-        const onLocationChange = () => setPath(window.location.pathname);
-        window.addEventListener('popstate', onLocationChange);
-        return () => window.removeEventListener('popstate', onLocationChange);
+        const onHashChange = () => setPath(getPathFromHash());
+        window.addEventListener('hashchange', onHashChange);
+        return () => window.removeEventListener('hashchange', onHashChange);
     }, []);
 
     if (path.startsWith('/inquiry/')) {
@@ -570,7 +572,7 @@ const AppContainer: React.FC = () => {
             return <PublicInquiryPage userId={userId} />;
         }
     }
-    
+
     return <App />;
 }
 
@@ -2123,7 +2125,7 @@ const InquiriesPage: React.FC<{
     fetchInquiries: (userId: string) => Promise<void>;
 }> = ({ inquiries, currentUser, clients, saveClient, setCurrentPage, showAlert, fetchInquiries }) => {
     
-    const publicLink = `${window.location.origin}/inquiry/${currentUser.id}`;
+    const publicLink = `${window.location.origin}/#/inquiry/${currentUser.id}`;
     const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(publicLink)}`;
 
     const handleConvertToBudget = async (inquiry: Inquiry) => {
