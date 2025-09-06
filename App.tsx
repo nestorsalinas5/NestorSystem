@@ -272,43 +272,45 @@ const App: React.FC = () => {
     if (loading) {
         return <div className="h-screen w-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200">Cargando...</div>;
     }
-
-    if (!session || !currentUser) {
-        return <AuthScreen showAlert={showAlert} />;
-    }
     
     return (
-      <div className="relative md:flex h-screen bg-gray-100 dark:bg-slate-900 text-gray-900 dark:text-gray-100 overflow-hidden">
-        {isSidebarOpen && <div className="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden" onClick={() => setIsSidebarOpen(false)}></div>}
-        <Sidebar 
-            currentPage={currentPage}
-            setCurrentPage={setCurrentPage}
-            currentUser={currentUser}
-            handleLogout={handleLogout}
-            isOpen={isSidebarOpen}
-            setIsOpen={setIsSidebarOpen}
-        />
-        <main className="flex-1 p-4 md:p-6 overflow-y-auto">
-            <Header 
-                currentPage={currentPage} 
-                currentUser={currentUser} 
-                toggleTheme={toggleTheme} 
-                theme={theme} 
-                onMenuClick={() => setIsSidebarOpen(true)}
-            />
-             <PageContent
-                currentPage={currentPage}
-                currentUser={currentUser}
-                events={events}
-                saveEvent={saveEvent}
-                deleteEvent={deleteEvent}
-                users={users}
-                saveUser={saveUser}
-                uploadLogo={uploadLogo}
-            />
-        </main>
-        <AlertModal alertState={alertState} onClose={() => setAlertState({ ...alertState, isOpen: false })} />
-      </div>
+        <>
+            {session && currentUser ? (
+                <div className="relative md:flex h-screen bg-gray-100 dark:bg-slate-900 text-gray-900 dark:text-gray-100 overflow-hidden">
+                    {isSidebarOpen && <div className="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden" onClick={() => setIsSidebarOpen(false)}></div>}
+                    <Sidebar
+                        currentPage={currentPage}
+                        setCurrentPage={setCurrentPage}
+                        currentUser={currentUser}
+                        handleLogout={handleLogout}
+                        isOpen={isSidebarOpen}
+                        setIsOpen={setIsSidebarOpen}
+                    />
+                    <main className="flex-1 p-4 md:p-6 overflow-y-auto">
+                        <Header
+                            currentPage={currentPage}
+                            currentUser={currentUser}
+                            toggleTheme={toggleTheme}
+                            theme={theme}
+                            onMenuClick={() => setIsSidebarOpen(true)}
+                        />
+                        <PageContent
+                            currentPage={currentPage}
+                            currentUser={currentUser}
+                            events={events}
+                            saveEvent={saveEvent}
+                            deleteEvent={deleteEvent}
+                            users={users}
+                            saveUser={saveUser}
+                            uploadLogo={uploadLogo}
+                        />
+                    </main>
+                </div>
+            ) : (
+                <AuthScreen showAlert={showAlert} />
+            )}
+            <AlertModal alertState={alertState} onClose={() => setAlertState({ ...alertState, isOpen: false })} />
+        </>
     );
 };
 
