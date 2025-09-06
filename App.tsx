@@ -1223,7 +1223,6 @@ const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
     const formatYAxis = (tickItem: number): string => {
         if (tickItem >= 1000000) return `${(tickItem / 1000000).toFixed(1)}M`;
         if (tickItem >= 1000) return `${Math.round(tickItem / 1000)}k`;
-        // FIX: Replaced String(tickItem) with tickItem.toString() to prevent "not callable" TypeScript error.
         return tickItem.toString();
     };
 
@@ -1280,7 +1279,20 @@ const UserManagementPage: React.FC<{users: User[], saveUser: (user: User, passwo
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
     const handleOpenModal = (user: User | null) => {
-        setSelectedUser(user);
+        if (user) {
+            setSelectedUser(user);
+        } else {
+            // FIX: Explicitly cast to User to satisfy TypeScript
+            const newUser: User = { 
+                id: '', 
+                email: '', 
+                role: 'user', 
+                status: 'active', 
+                activeUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(), 
+                company_name: '' 
+            };
+            setSelectedUser(newUser);
+        }
         setIsModalOpen(true);
     };
 
@@ -2126,11 +2138,10 @@ const InquiriesPage: React.FC<{
     fetchInquiries: (userId: string) => Promise<void>;
 }> = ({ inquiries, currentUser, clients, saveClient, setCurrentPage, showAlert, fetchInquiries }) => {
     
-    const publicLink = `${window.location.origin}/#/inquiry/${currentUser.id}`;
+    const publicLink = `${window.location.origin}${window.location.pathname}#/inquiry/${currentUser.id}`;
     const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(publicLink)}`;
 
     const handleConvertToBudget = async (inquiry: Inquiry) => {
-        // This is a simplified conversion. A real app might have a more complex flow.
         let client = clients.find(c => c.email && c.email === inquiry.client_email);
         if (!client) {
             const newClient = await saveClient({
@@ -2147,8 +2158,6 @@ const InquiriesPage: React.FC<{
             client = newClient;
         }
         
-        // For simplicity, we navigate to budgets page. A better UX would be to open the modal pre-filled.
-        // This would require lifting budget modal state to the main App component.
         showAlert("Cliente encontrado/creado. Por favor, crea un presupuesto para ellos.", "success");
         setCurrentPage('budgets');
     };
@@ -2184,13 +2193,20 @@ const InquiriesPage: React.FC<{
                     <table className="w-full text-left">
                         <thead>
                             <tr className="border-b dark:border-gray-700">
-                                <th className="p-2">Cliente</th><th className="p-2">Fecha Evento</th><th className="p-2">Estado</th><th className="p-2">Acciones</th>
+                                <th className="p-2">Cliente</th>
+                                <th className="p-2">Email</th>
+                                <th className="p-2">Teléfono</th>
+                                <th className="p-2">Fecha Evento</th>
+                                <th className="p-2">Estado</th>
+                                <th className="p-2">Acciones</th>
                             </tr>
                         </thead>
                         <tbody>
                             {inquiries.map(inquiry => (
                                 <tr key={inquiry.id} className="border-b dark:border-gray-700">
                                     <td className="p-2">{inquiry.client_name}</td>
+                                    <td className="p-2">{inquiry.client_email || 'N/A'}</td>
+                                    <td className="p-2">{inquiry.client_phone || 'N/A'}</td>
                                     <td className="p-2">{inquiry.event_date ? new Date(inquiry.event_date).toLocaleDateString() : 'N/A'}</td>
                                     <td className="p-2">
                                         <select value={inquiry.status} onChange={(e) => updateInquiryStatus(inquiry.id, e.target.value as Inquiry['status'])} className="p-1 border rounded dark:bg-gray-700 dark:border-gray-600">
@@ -2200,7 +2216,12 @@ const InquiriesPage: React.FC<{
                                         </select>
                                     </td>
                                     <td className="p-2">
-                                        <button onClick={() => handleConvertToBudget(inquiry)} className="text-primary-600 hover:underline">Convertir a Presupuesto</button>
+                                        <button 
+                                            onClick={() => handleConvertToBudget(inquiry)} 
+                                            className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 text-sm font-semibold"
+                                        >
+                                            Convertir a Presupuesto
+                                        </button>
                                     </td>
                                 </tr>
                             ))}
