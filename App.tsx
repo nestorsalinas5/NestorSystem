@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus } from './types';
 import { getDashboardInsights } from './services/geminiService';
@@ -680,8 +681,13 @@ const App: React.FC = () => {
         // Active Announcement
         const { data: announcementData, error: announcementError } = await supabase.from('announcements').select('*').eq('is_active', true).single();
         if(announcementData && !announcementError) {
-             setActiveAnnouncement(announcementData as Announcement);
-             setIsAnnouncementModalOpen(true);
+             const announcementId = announcementData.id;
+             const hasSeen = sessionStorage.getItem(`seen_announcement_${announcementId}`);
+             if (!hasSeen) {
+                 setActiveAnnouncement(announcementData as Announcement);
+                 setIsAnnouncementModalOpen(true);
+                 sessionStorage.setItem(`seen_announcement_${announcementId}`, 'true');
+             }
         }
         
         // Notifications
@@ -715,22 +721,38 @@ const App: React.FC = () => {
     
     const saveEvent = async (event: Event) => {
         const isNew = !event.id;
-        const { id, client, ...eventData } = event;
-
+        
         const payload = {
-            ...eventData,
+            ...event,
             user_id: currentUser!.id,
+            client: undefined, // Remove joined data before saving
             expenses: event.expenses.map(({ id, ...rest }) => rest),
         };
+        delete payload.client;
         
         const { error } = isNew 
             ? await supabase.from('events').insert(payload)
-            : await supabase.from('events').update(payload).eq('id', id);
+            : await supabase.from('events').update(payload).eq('id', event.id);
 
         if (error) {
             showAlert('Error al guardar el evento: ' + error.message, 'error');
         } else {
             showAlert('Evento guardado exitosamente.', 'success');
+            if (isNew) {
+                const client = clients.find(c => c.id === event.client_id);
+                if (client && client.email) {
+                    await supabase.functions.invoke('send-event-confirmation', {
+                        body: {
+                            clientEmail: client.email,
+                            clientName: client.name,
+                            eventName: event.name,
+                            eventDate: event.date,
+                            eventLocation: event.location,
+                            companyName: currentUser!.company_name,
+                        }
+                    });
+                }
+            }
             await fetchUserData(currentUser!.id);
         }
     };
@@ -750,10 +772,7 @@ const App: React.FC = () => {
         const isNew = !client.id;
         const { id, ...clientData } = client;
         
-        const payload = {
-            ...clientData,
-            user_id: currentUser!.id,
-        };
+        const payload = isNew ? { ...clientData, user_id: currentUser!.id } : { ...clientData };
 
         const { error } = isNew
             ? await supabase.from('clients').insert(payload)
@@ -1133,6 +1152,13 @@ const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
 
         return { totalIncome, totalExpenses, netProfit, monthlyData, topClients };
     }, [events]);
+    
+    const formatYAxis = (tickItem: number) => {
+        if (tickItem >= 1000000) return `${tickItem / 1000000}M`;
+        if (tickItem >= 1000) return `${tickItem / 1000}k`;
+        // FIX: The tickFormatter for recharts YAxis expects a string return type. The original code returned a number for values less than 1000, causing a TypeScript error. Returning a string representation of the number resolves the issue.
+        return String(tickItem);
+    };
 
     return (
         <div className="space-y-6">
@@ -1157,7 +1183,7 @@ const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
                         <LineChart data={monthlyData}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(128, 128, 128, 0.3)" />
                             <XAxis dataKey="name" />
-                            <YAxis tickFormatter={(value) => formatGuarani(value as number)} />
+                            <YAxis tickFormatter={formatYAxis} />
                             <Tooltip formatter={(value) => formatGuarani(value as number)} />
                             <Legend />
                             <Line type="monotone" dataKey="Ingresos" stroke="#3b82f6" strokeWidth={2} />
