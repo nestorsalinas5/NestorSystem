@@ -721,30 +721,31 @@ const App: React.FC = () => {
     
     const saveEvent = async (event: Event) => {
         const isNew = !event.id;
-        
+        const { id, client, ...eventData } = event;
+    
         const payload = {
-            ...event,
+            ...eventData,
             user_id: currentUser!.id,
-            client: undefined, // Remove joined data before saving
-            expenses: event.expenses.map(({ id, ...rest }) => rest),
+            expenses: event.expenses.map(({ id: expenseId, ...rest }) => rest),
         };
-        delete payload.client;
         
-        const { error } = isNew 
-            ? await supabase.from('events').insert(payload)
-            : await supabase.from('events').update(payload).eq('id', event.id);
+        const query = isNew
+            ? supabase.from('events').insert(payload)
+            : supabase.from('events').update(payload).eq('id', id);
+
+        const { error } = await query;
 
         if (error) {
             showAlert('Error al guardar el evento: ' + error.message, 'error');
         } else {
             showAlert('Evento guardado exitosamente.', 'success');
             if (isNew) {
-                const client = clients.find(c => c.id === event.client_id);
-                if (client && client.email) {
+                const eventClient = clients.find(c => c.id === event.client_id);
+                if (eventClient && eventClient.email) {
                     await supabase.functions.invoke('send-event-confirmation', {
                         body: {
-                            clientEmail: client.email,
-                            clientName: client.name,
+                            clientEmail: eventClient.email,
+                            clientName: eventClient.name,
                             eventName: event.name,
                             eventDate: event.date,
                             eventLocation: event.location,
@@ -929,11 +930,10 @@ const App: React.FC = () => {
         const isNew = !budget.id;
         const { id, client, ...budgetData } = budget;
 
-        const payload = {
-            ...budgetData,
-            user_id: currentUser!.id,
-            items: budget.items.map(({ id, ...rest }) => rest), // Remove temp client-side id
-        };
+        const payload = isNew
+            ? { ...budgetData, user_id: currentUser!.id, items: budget.items.map(({ id: itemId, ...rest }) => rest) }
+            : { ...budgetData, items: budget.items.map(({ id: itemId, ...rest }) => rest) };
+
 
         const { error } = isNew
             ? await supabase.from('budgets').insert(payload)
@@ -1153,10 +1153,9 @@ const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
         return { totalIncome, totalExpenses, netProfit, monthlyData, topClients };
     }, [events]);
     
-    const formatYAxis = (tickItem: number) => {
-        if (tickItem >= 1000000) return `${tickItem / 1000000}M`;
-        if (tickItem >= 1000) return `${tickItem / 1000}k`;
-        // FIX: The tickFormatter for recharts YAxis expects a string return type. The original code returned a number for values less than 1000, causing a TypeScript error. Returning a string representation of the number resolves the issue.
+    const formatYAxis = (tickItem: number): string => {
+        if (tickItem >= 1000000) return `${(tickItem / 1000000).toFixed(1)}M`;
+        if (tickItem >= 1000) return `${Math.round(tickItem / 1000)}k`;
         return String(tickItem);
     };
 
