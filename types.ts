@@ -1,4 +1,3 @@
-
 export interface Client {
   id: string; // From Supabase
   user_id: string;
@@ -57,4 +56,27 @@ export interface Notification {
   created_at: string;
 }
 
-export type Page = 'dashboard' | 'events' | 'clients' | 'agenda' | 'reports' | 'settings' | 'userManagement' | 'announcements' | 'sendNotification';
+export interface BudgetItem {
+  id: string; // temp client-side id
+  description: string;
+  quantity: number;
+  price: number;
+}
+
+export type BudgetStatus = 'Borrador' | 'Enviado' | 'Aceptado' | 'Rechazado';
+
+export interface Budget {
+  id: string;
+  user_id: string;
+  client_id: string;
+  client?: Client; // for joined data
+  title: string;
+  status: BudgetStatus;
+  items: BudgetItem[];
+  discount: number;
+  notes?: string;
+  valid_until?: string;
+  created_at: string;
+}
+
+export type Page = 'dashboard' | 'events' | 'clients' | 'agenda' | 'reports' | 'settings' | 'userManagement' | 'announcements' | 'sendNotification' | 'budgets';
