@@ -1223,7 +1223,8 @@ const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
     const formatYAxis = (tickItem: number): string => {
         if (tickItem >= 1000000) return `${(tickItem / 1000000).toFixed(1)}M`;
         if (tickItem >= 1000) return `${Math.round(tickItem / 1000)}k`;
-        return String(tickItem);
+        // FIX: Replaced String(tickItem) with tickItem.toString() to prevent "not callable" TypeScript error.
+        return tickItem.toString();
     };
 
     return (
@@ -2220,11 +2221,14 @@ const PublicInquiryPage: React.FC<{ userId: string }> = ({ userId }) => {
 
     useEffect(() => {
         const fetchDjProfile = async () => {
-            const { data, error } = await supabase.from('profiles').select('company_name, companyLogoUrl').eq('id', userId).single();
+            const { data, error } = await supabase.from('profiles').select('company_name, company_logo_url').eq('id', userId).single();
             if (error || !data) {
                 setError("No se pudo encontrar el perfil del proveedor.");
             } else {
-                setDjProfile(data);
+                setDjProfile({
+                    company_name: data.company_name,
+                    companyLogoUrl: data.company_logo_url
+                });
             }
             setLoading(false);
         };
