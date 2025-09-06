@@ -18,7 +18,7 @@ export interface Event {
   client: Client;
   location: string;
   date: string; // ISO string format
-  amountCharged: number;
+  amount_charged: number;
   expenses: Expense[];
   observations?: string;
 }
