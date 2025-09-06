@@ -172,7 +172,8 @@ const Header: React.FC<{
     isNotificationsOpen: boolean;
     setIsNotificationsOpen: (isOpen: boolean) => void;
     markNotificationsAsRead: () => void;
-}> = ({ currentUser, toggleTheme, theme, onMenuClick, notifications, isNotificationsOpen, setIsNotificationsOpen, markNotificationsAsRead }) => {
+    daysUntilExpiry: number | null;
+}> = ({ currentUser, toggleTheme, theme, onMenuClick, notifications, isNotificationsOpen, setIsNotificationsOpen, markNotificationsAsRead, daysUntilExpiry }) => {
     
     const notificationRef = useRef<HTMLDivElement>(null);
     const unreadCount = notifications.filter(n => !n.is_read).length;
@@ -205,6 +206,12 @@ const Header: React.FC<{
                 </h2>
             </div>
             <div className="flex items-center space-x-4">
+                {daysUntilExpiry !== null && daysUntilExpiry <= 10 && daysUntilExpiry >= 0 && (
+                     <div className="hidden md:flex items-center space-x-2 bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-300 px-3 py-1.5 rounded-full text-sm font-medium">
+                         <WarningIcon />
+                         <span>Tu licencia vence en {daysUntilExpiry} día{daysUntilExpiry !== 1 ? 's' : ''}.</span>
+                     </div>
+                )}
                 <button onClick={toggleTheme} className="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700">
                     {theme === 'light' ? <MoonIcon /> : <SunIcon />}
                 </button>
@@ -724,6 +731,15 @@ const App: React.FC = () => {
             setNotifications(updatedNotifications);
         }
     };
+
+    const daysUntilExpiry = useMemo(() => {
+        if (!currentUser?.activeUntil) return null;
+        const expiryDate = new Date(currentUser.activeUntil);
+        const today = new Date();
+        const diffTime = expiryDate.getTime() - today.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        return diffDays;
+    }, [currentUser]);
     
     if (loading) {
         return <div className="h-screen w-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200">Cargando...</div>;
@@ -752,6 +768,7 @@ const App: React.FC = () => {
                             isNotificationsOpen={isNotificationsOpen}
                             setIsNotificationsOpen={setIsNotificationsOpen}
                             markNotificationsAsRead={markNotificationsAsRead}
+                            daysUntilExpiry={daysUntilExpiry}
                         />
                         <PageContent
                             currentPage={currentPage}
@@ -1267,87 +1284,112 @@ const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events,
         return { income, expenses, net: income - expenses };
     }, [filteredEvents]);
 
-    const exportToPDF = () => {
+    const getBase64ImageFromUrl = (url: string): Promise<string | null> => {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = 'Anonymous';
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    return resolve(null);
+                }
+                ctx.drawImage(img, 0, 0);
+                const dataURL = canvas.toDataURL('image/png');
+                resolve(dataURL);
+            };
+            img.onerror = error => {
+                console.error("Error loading image for PDF:", error);
+                resolve(null);
+            };
+            img.src = url;
+        });
+    }
+
+    const exportToPDF = async () => {
         const doc = new jsPDF();
-        // FIX: Cast 'bold' to the correct FontStyle literal type for jspdf-autotable.
         const headStyles = { fillColor: '#2563eb', textColor: '#ffffff', fontStyle: 'bold' as 'bold' };
-        const subHeaderStyles = { fillColor: '#e0e7ff', textColor: '#1e3a8a', fontStyle: 'bold' as 'bold', fontSize: 9 };
-        const expenseRowStyles = { fillColor: '#f3f4f6', textColor: '#4b5563', fontSize: 9 };
+        
+        const logoDataUrl = currentUser.companyLogoUrl ? await getBase64ImageFromUrl(currentUser.companyLogoUrl) : null;
+        
+        const pageMargin = 15;
 
-        const body: any[] = [];
+        // --- PDF Header ---
+        if (logoDataUrl) {
+            doc.addImage(logoDataUrl, 'PNG', pageMargin, 15, 20, 20);
+        }
+        doc.setFontSize(22);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor('#1d4ed8'); // primary-700
+        doc.text(currentUser.company_name, logoDataUrl ? pageMargin + 25 : pageMargin, 22);
 
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(100);
+        doc.text(`Reporte de Eventos`, logoDataUrl ? pageMargin + 25 : pageMargin, 29);
+        doc.text(`Período: ${new Date(startDate).toLocaleDateString()} - ${new Date(endDate).toLocaleDateString()}`, logoDataUrl ? pageMargin + 25 : pageMargin, 34);
+
+        // --- PDF Table ---
+        const tableBody: any[] = [];
         filteredEvents.forEach(event => {
-            const eventExpensesTotal = event.expenses.reduce((sum, exp) => sum + exp.amount, 0);
-            const net = event.amount_charged - eventExpensesTotal;
-            
-            // Main event row with alternating styles
-            body.push([
-                // FIX: Cast 'bold' to the correct FontStyle literal type for jspdf-autotable.
-                { content: event.name, styles: { fontStyle: 'bold' as 'bold' } },
+            const totalEventExpenses = event.expenses.reduce((sum, exp) => sum + exp.amount, 0);
+            const netProfit = event.amount_charged - totalEventExpenses;
+
+            tableBody.push([
+                event.name,
                 event.client?.name || 'N/A',
                 new Date(event.date).toLocaleDateString(),
                 formatGuarani(event.amount_charged),
-                formatGuarani(eventExpensesTotal),
-                formatGuarani(net),
+                formatGuarani(totalEventExpenses),
+                formatGuarani(netProfit)
             ]);
-
-            // Add expense breakdown if there are any
-            if (event.expenses.length > 0) {
-                event.expenses.forEach(expense => {
-                    body.push([
-                        { content: `  └ ${expense.type}`, colSpan: 4, styles: expenseRowStyles },
-                        { content: formatGuarani(expense.amount), colSpan: 2, styles: { ...expenseRowStyles, halign: 'right' } }
-                    ]);
-                });
-            }
         });
 
         autoTable(doc, {
             head: [["Evento", "Cliente", "Fecha", "Ingreso", "Gastos", "Ganancia"]],
-            body: body,
-            startY: 40,
+            body: tableBody,
+            startY: 50,
             headStyles: headStyles,
             theme: 'grid',
-            alternateRowStyles: { fillColor: [249, 250, 251] }, // very light gray for main event rows
+            styles: { fontSize: 9, cellPadding: 2 },
+            columnStyles: {
+                3: { halign: 'right' },
+                4: { halign: 'right' },
+                5: { halign: 'right' }
+            },
             didDrawPage: (data) => {
-                // Header
-                doc.setFontSize(20);
-                doc.setFont('helvetica', 'bold');
-                doc.setTextColor(41, 100, 235); // primary-600
-                doc.text(currentUser.company_name, data.settings.margin.left, 20);
-                
-                doc.setFontSize(12);
-                doc.setFont('helvetica', 'normal');
-                doc.setTextColor(40);
-                doc.text(`Reporte de Eventos del ${new Date(startDate).toLocaleDateString()} al ${new Date(endDate).toLocaleDateString()}`, data.settings.margin.left, 28);
-
-                // Footer
+                // --- PDF Footer ---
                 const pageCount = (doc as any).internal.getNumberOfPages ? (doc as any).internal.getNumberOfPages() : 0;
                 doc.setFontSize(8);
                 doc.setTextColor(150);
                 doc.text(`Generado por GestionSystemDj`, data.settings.margin.left, doc.internal.pageSize.height - 10);
-                doc.text(`Página ${data.pageNumber} de ${pageCount}`, doc.internal.pageSize.width / 2, doc.internal.pageSize.height - 10, { align: 'center' });
+                doc.text(`Página ${data.pageNumber} de ${pageCount}`, doc.internal.pageSize.width - data.settings.margin.right, doc.internal.pageSize.height - 10, { align: 'right' });
             },
-            margin: { top: 35 }
+            margin: { left: pageMargin, right: pageMargin }
         });
 
-        const finalY = (doc as any).lastAutoTable.finalY || 40;
-        doc.setFontSize(12);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(40);
-        doc.text('Resumen del Período', 14, finalY + 15);
-        
+        // --- PDF Summary ---
+        const finalY = (doc as any).lastAutoTable.finalY || 50;
+        // FIX: Changed doc.autoTable to autoTable(doc, ...) to fix TypeScript error and for consistency.
         autoTable(doc, {
-            body: [
-                ['Total Ingresos:', { content: formatGuarani(totals.income), styles: { halign: 'right' }}],
-                ['Total Gastos:', { content: formatGuarani(totals.expenses), styles: { halign: 'right' }}],
-                // FIX: Cast 'bold' to the correct FontStyle literal type for jspdf-autotable.
-                [{ content: 'Ganancia Neta Total:', styles: { fontStyle: 'bold' as 'bold' } }, { content: formatGuarani(totals.net), styles: { fontStyle: 'bold' as 'bold', halign: 'right' } }],
-            ],
-            startY: finalY + 18,
+            startY: finalY + 10,
             theme: 'plain',
             tableWidth: 'wrap',
-            styles: { cellPadding: 2, fontSize: 10 },
+            margin: { left: doc.internal.pageSize.width - 70 - pageMargin }, // Align to the right
+            body: [
+                ['Total Ingresos:', { content: formatGuarani(totals.income), styles: { halign: 'right' } }],
+                ['Total Gastos:', { content: formatGuarani(totals.expenses), styles: { halign: 'right' } }],
+                [{
+                    content: 'Ganancia Neta Total:',
+                    styles: { fontStyle: 'bold' as 'bold' }
+                }, {
+                    content: formatGuarani(totals.net),
+                    styles: { fontStyle: 'bold' as 'bold', halign: 'right' }
+                }],
+            ],
+            styles: { fontSize: 10, cellPadding: 2 },
             columnStyles: { 0: { cellWidth: 40 } },
         });
 
