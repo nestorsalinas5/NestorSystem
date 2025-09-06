@@ -88,6 +88,11 @@ const App: React.FC = () => {
 
         if (error) {
             console.error('Error fetching user profile:', error);
+            // This can happen if RLS fails, we sign out to prevent broken states
+            if (error.code !== 'PGRST116') { // Ignore "exact one row was not found"
+                 alert(`Error al cargar tu perfil: ${error.message}`);
+                 await supabase.auth.signOut();
+            }
             return null;
         }
         const { data: { user } } = await supabase.auth.getUser();
@@ -104,26 +109,32 @@ const App: React.FC = () => {
     }, []);
     
     useEffect(() => {
+        const processSession = (session: AuthSession | null) => {
+            setSession(session);
+            if (session?.user) {
+                fetchUserProfile(session.user.id).then(profile => {
+                    if (profile && profile.status === 'inactive') {
+                        alert('Tu cuenta está inactiva. Por favor, contacta al administrador.');
+                        supabase.auth.signOut();
+                        setCurrentUser(null);
+                    } else {
+                        setCurrentUser(profile);
+                    }
+                    setLoading(false);
+                });
+            } else {
+                setCurrentUser(null);
+                setLoading(false);
+            }
+        };
+
         setLoading(true);
         supabase.auth.getSession().then(({ data: { session } }) => {
-          setSession(session);
-          if (session?.user) {
-            fetchUserProfile(session.user.id).then(profile => {
-                setCurrentUser(profile);
-                setLoading(false);
-            });
-          } else {
-            setLoading(false);
-          }
+            processSession(session);
         });
 
         const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-            setSession(session);
-            if (session?.user) {
-                fetchUserProfile(session.user.id).then(setCurrentUser);
-            } else {
-                setCurrentUser(null);
-            }
+            processSession(session);
         });
 
         return () => authListener.subscription.unsubscribe();
@@ -134,27 +145,25 @@ const App: React.FC = () => {
         const { data, error } = await supabase.from('profiles').select('*');
         if (error) {
             console.error("Error fetching users:", error);
+            alert(`Error al cargar la lista de usuarios: ${error.message}`);
             return;
         }
         
-        const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
+        const { data: { users: authUsers }, error: authError } = await supabase.auth.admin.listUsers();
         if (authError) {
             console.error("Error fetching auth users:", authError);
-            // FIX: Added return to prevent execution when there is an authError.
-            // This prevents a TypeScript error where `authUsers.users` would be `never[]`.
+            alert(`Error al cargar datos de autenticación: ${authError.message}`);
             return;
         }
         
         const profiles = data || [];
         
-        // FIX: Map snake_case `active_until` from the database to camelCase `activeUntil` for the app state.
-        // This solves the "Invalid Date" and "Cannot read properties of undefined (reading 'split')" errors.
         const mappedUsers = profiles.map((profile: any) => {
-            const authUser = authUsers?.users.find(u => u.id === profile.id);
+            const authUser = authUsers?.find(u => u.id === profile.id);
             return {
                 ...profile,
-                activeUntil: profile.active_until, // MAPPING a camelCase
-                email: authUser?.email || profile.email,
+                activeUntil: profile.active_until, 
+                email: authUser?.email || 'N/A',
             };
         });
         
@@ -193,11 +202,19 @@ const App: React.FC = () => {
     
     const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
     
+    // FIX: The 'Property 'id' does not exist on type 'never'' error on the destructuring line
+    // is often a sign of a complex type inference issue. Explicitly destructuring all properties
+    // instead of using a rest parameter (`...rest`) can resolve such obscure TypeScript errors by being more direct.
     const saveEvent = async (event: Event) => {
-        const { id, expenses, ...rest } = event;
+        const { id, expenses, name, client, location, date, amount_charged, observations } = event;
 
         const payload = {
-            ...rest,
+            name,
+            client,
+            location,
+            date,
+            amount_charged,
+            observations,
             user_id: currentUser!.id,
             expenses: (expenses || []).map(({ type, amount }) => ({ type, amount })),
         };
