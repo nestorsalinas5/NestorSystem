@@ -14,11 +14,12 @@ export interface Expense {
 }
 
 export interface Event {
-  id: string; // Will be a UUID from Supabase
+  id:string; // Will be a UUID from Supabase
   user_id: string; // Associate event with a user
-  name: string;
   client_id: string | null; // Foreign key to the clients table
   client: Client | null; // To hold the joined client data
+  // FIX: Add missing 'name' property to the Event interface.
+  name: string;
   location: string;
   date: string; // ISO string format
   amount_charged: number;
@@ -37,6 +38,15 @@ export interface User {
   activeUntil: string; // ISO string
   company_name: string;
   companyLogoUrl?: string; // URL from Supabase Storage
+}
+
+export type NotificationType = 'event' | 'license';
+
+export interface Notification {
+  id: string;
+  type: NotificationType;
+  message: string;
+  date: string; // ISO string when the notification was generated
 }
 
 export type Page = 'dashboard' | 'events' | 'clients' | 'agenda' | 'reports' | 'settings' | 'userManagement';
