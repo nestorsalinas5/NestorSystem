@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Page, Event, Client, Expense, User, Notification, Announcement } from './types';
+import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus } from './types';
 import { getDashboardInsights } from './services/geminiService';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon } from './components/Icons.tsx';
+import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon } from './components/Icons.tsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { createClient, AuthSession, User as SupabaseUser } from '@supabase/supabase-js';
@@ -108,6 +109,7 @@ const Sidebar: React.FC<{
             );
         } else {
              items.push(
+                { page: 'budgets', label: 'Presupuestos', icon: <BudgetIcon /> },
                 { page: 'events', label: 'Eventos', icon: <EventsIcon /> },
                 { page: 'clients', label: 'Clientes', icon: <ClientsIcon /> },
                 { page: 'agenda', label: 'Agenda', icon: <AgendaIcon /> },
@@ -426,18 +428,21 @@ const App: React.FC = () => {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [alertState, setAlertState] = useState<AlertState>({ isOpen: false, message: '', type: 'success' });
     
-    // New States for Admin Features
+    // Admin Features
     const [announcements, setAnnouncements] = useState<Announcement[]>([]);
     const [activeAnnouncement, setActiveAnnouncement] = useState<Announcement | null>(null);
     const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
 
-    // Refactored Notifications
+    // Notifications
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
 
+    // User Data
     const [users, setUsers] = useState<User[]>([]); 
     const [events, setEvents] = useState<Event[]>([]); 
     const [clients, setClients] = useState<Client[]>([]);
+    const [budgets, setBudgets] = useState<Budget[]>([]);
+
 
     const showAlert = (message: string, type: 'success' | 'error' = 'error') => {
         setAlertState({ isOpen: true, message, type });
@@ -525,6 +530,12 @@ const App: React.FC = () => {
         else setClients(data as Client[] || []);
     }, []);
 
+    const fetchBudgets = useCallback(async (userId: string) => {
+        const { data, error } = await supabase.from('budgets').select('*, client:clients(*)').eq('user_id', userId).order('created_at', { ascending: false });
+        if (error) showAlert("Error al cargar los presupuestos: " + error.message, 'error');
+        else setBudgets(data as Budget[] || []);
+    }, []);
+
     const fetchUserData = useCallback(async (userId: string) => {
         // Events
         const { data: eventsData, error: eventsError } = await supabase.from('events').select('*, client:clients(*)').eq('user_id', userId).order('date', { ascending: false });
@@ -553,11 +564,12 @@ const App: React.FC = () => {
             else {
                 await fetchUserData(currentUser.id);
                 await fetchClients(currentUser.id);
+                await fetchBudgets(currentUser.id);
             }
             setLoading(false);
         };
         fetchData();
-    }, [currentUser, fetchAdminData, fetchUserData, fetchClients]);
+    }, [currentUser, fetchAdminData, fetchUserData, fetchClients, fetchBudgets]);
 
     const handleLogout = async () => {
         await supabase.auth.signOut();
@@ -567,24 +579,18 @@ const App: React.FC = () => {
     const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
     
     const saveEvent = async (event: Event) => {
-        const isNew = !event.id;
-        
-        // Destructure to remove properties not in the 'events' table
-        const { client, ...eventData } = event; 
+        const { client, id, ...eventData } = event; 
+        const isNew = !id;
 
-        // Prepare the base payload
         const payload = {
             ...eventData,
             user_id: currentUser!.id,
-            expenses: event.expenses.map(({ id, ...rest }) => rest), // Remove temp client-side id from expenses
+            expenses: event.expenses.map(({ id, ...rest }) => rest),
         };
         
-        // If it's a new event, delete the id property so the DB can generate it
-        if (isNew) {
-            delete (payload as any).id;
-        }
-
-        const { error } = await supabase.from('events').upsert(payload);
+        const { error } = isNew 
+            ? await supabase.from('events').insert(payload)
+            : await supabase.from('events').update(payload).eq('id', id);
 
         if (error) {
             showAlert('Error al guardar el evento: ' + error.message, 'error');
@@ -606,18 +612,17 @@ const App: React.FC = () => {
     };
 
     const saveClient = async (client: Client) => {
-        const isNew = !client.id;
+        const { id, ...clientData } = client;
+        const isNew = !id;
         
-        const clientData = {
-            name: client.name,
-            phone: client.phone,
-            email: client.email,
+        const payload = {
+            ...clientData,
             user_id: currentUser!.id,
         };
 
         const { error } = isNew
-            ? await supabase.from('clients').insert(clientData)
-            : await supabase.from('clients').update(clientData).eq('id', client.id);
+            ? await supabase.from('clients').insert(payload)
+            : await supabase.from('clients').update(payload).eq('id', id);
 
         if (error) {
             showAlert('Error al guardar el cliente: ' + error.message, 'error');
@@ -766,6 +771,39 @@ const App: React.FC = () => {
         return diffDays;
     }, [currentUser]);
     
+    const saveBudget = async (budget: Budget) => {
+        const { id, client, ...budgetData } = budget;
+        const isNew = !id;
+
+        const payload = {
+            ...budgetData,
+            user_id: currentUser!.id,
+            items: budget.items.map(({ id, ...rest }) => rest), // Remove temp client-side id
+        };
+
+        const { error } = isNew
+            ? await supabase.from('budgets').insert(payload)
+            : await supabase.from('budgets').update(payload).eq('id', id);
+
+        if (error) {
+            showAlert('Error al guardar el presupuesto: ' + error.message, 'error');
+        } else {
+            showAlert('Presupuesto guardado exitosamente.', 'success');
+            await fetchBudgets(currentUser!.id);
+        }
+    };
+
+    const deleteBudget = async (budgetId: string) => {
+        if (window.confirm('¿Estás seguro de que quieres eliminar este presupuesto?')) {
+            const { error } = await supabase.from('budgets').delete().eq('id', budgetId);
+            if (error) showAlert('Error al eliminar el presupuesto: ' + error.message, 'error');
+            else {
+                showAlert('Presupuesto eliminado.', 'success');
+                await fetchBudgets(currentUser!.id);
+            }
+        }
+    };
+    
     if (loading) {
         return <div className="h-screen w-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200">Cargando...</div>;
     }
@@ -800,10 +838,13 @@ const App: React.FC = () => {
                             currentUser={currentUser}
                             events={events}
                             clients={clients}
+                            budgets={budgets}
                             saveEvent={saveEvent}
                             deleteEvent={deleteEvent}
                             saveClient={saveClient}
                             deleteClient={deleteClient}
+                            saveBudget={saveBudget}
+                            deleteBudget={deleteBudget}
                             users={users}
                             saveUser={saveUser}
                             uploadLogo={uploadLogo}
@@ -837,10 +878,13 @@ const PageContent: React.FC<{
     currentUser: User;
     events: Event[];
     clients: Client[];
+    budgets: Budget[];
     saveEvent: (event: Event) => Promise<void>;
     deleteEvent: (id: string) => Promise<void>;
     saveClient: (client: Client) => Promise<void>;
     deleteClient: (id: string) => Promise<void>;
+    saveBudget: (budget: Budget) => Promise<void>;
+    deleteBudget: (id: string) => Promise<void>;
     users: User[];
     saveUser: (user: User, password?: string) => Promise<void>;
     uploadLogo: (userId: string, file: File) => Promise<string | null>;
@@ -856,6 +900,8 @@ const PageContent: React.FC<{
             return props.currentUser.role === 'admin' 
                 ? <DashboardAdmin users={props.users} /> 
                 : <DashboardUser events={props.events} />;
+        case 'budgets':
+            return <BudgetsPage budgets={props.budgets} clients={props.clients} currentUser={props.currentUser} saveBudget={props.saveBudget} deleteBudget={props.deleteBudget} showAlert={props.showAlert} />;
         case 'events':
             return <EventsPage events={props.events} clients={props.clients} saveEvent={props.saveEvent} deleteEvent={props.deleteEvent} />;
         case 'clients':
@@ -1397,7 +1443,7 @@ const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events,
 
         // --- PDF Summary ---
         const finalY = (doc as any).lastAutoTable.finalY || 50;
-        // FIX: Changed doc.autoTable to autoTable(doc, ...) to fix TypeScript error and for consistency.
+        
         autoTable(doc, {
             startY: finalY + 10,
             theme: 'plain',
@@ -1605,6 +1651,256 @@ const AnnouncementModal: React.FC<{
             </div>
         </div>
     )
+}
+
+// --- NEW BUDGET COMPONENTS ---
+
+const BudgetsPage: React.FC<{
+    budgets: Budget[];
+    clients: Client[];
+    currentUser: User;
+    saveBudget: (budget: Budget) => Promise<void>;
+    deleteBudget: (id: string) => Promise<void>;
+    showAlert: (message: string, type: 'success' | 'error') => void;
+}> = ({ budgets, clients, currentUser, saveBudget, deleteBudget, showAlert }) => {
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [selectedBudget, setSelectedBudget] = useState<Budget | null>(null);
+    const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+    const [budgetToSend, setBudgetToSend] = useState<Budget | null>(null);
+
+    const handleOpenModal = (budget: Budget | null) => {
+        setSelectedBudget(budget);
+        setIsModalOpen(true);
+    };
+
+    const handleSave = async (budget: Budget) => {
+        await saveBudget(budget);
+        setIsModalOpen(false);
+    };
+
+    const handleOpenEmailModal = (budget: Budget) => {
+        setBudgetToSend(budget);
+        setIsEmailModalOpen(true);
+    };
+    
+    return (
+        <div className="bg-white dark:bg-gray-800 p-4 md:p-6 rounded-lg shadow">
+            <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xl font-semibold">Mis Presupuestos</h3>
+                <button onClick={() => handleOpenModal(null)} className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700">Crear Presupuesto</button>
+            </div>
+            <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                    <thead>
+                        <tr className="border-b dark:border-gray-700">
+                            <th className="p-2">Título</th><th className="p-2">Cliente</th><th className="p-2">Fecha</th><th className="p-2">Estado</th><th className="p-2">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {budgets.map(budget => (
+                            <tr key={budget.id} className="border-b dark:border-gray-700">
+                                <td className="p-2">{budget.title}</td>
+                                <td className="p-2">{budget.client?.name || 'N/A'}</td>
+                                <td className="p-2">{new Date(budget.created_at).toLocaleDateString()}</td>
+                                <td className="p-2">{budget.status}</td>
+                                <td className="p-2 flex space-x-2">
+                                    <button onClick={() => handleOpenModal(budget)} className="text-primary-600 hover:underline">Editar</button>
+                                    <button onClick={() => deleteBudget(budget.id)} className="text-red-500 hover:underline">Eliminar</button>
+                                    <button onClick={() => handleOpenEmailModal(budget)} className="text-green-600 hover:underline">Enviar</button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+            {isModalOpen && <BudgetFormModal budget={selectedBudget} clients={clients} onSave={handleSave} onClose={() => setIsModalOpen(false)} />}
+            {isEmailModalOpen && budgetToSend && <EmailBudgetModal budget={budgetToSend} currentUser={currentUser} onClose={() => setIsEmailModalOpen(false)} showAlert={showAlert} />}
+        </div>
+    );
+};
+
+const BudgetFormModal: React.FC<{
+    budget: Budget | null;
+    clients: Client[];
+    onSave: (budget: Budget) => void;
+    onClose: () => void;
+}> = ({ budget, clients, onSave, onClose }) => {
+    const isNew = !budget;
+    const initialBudget: Budget = useMemo(() => {
+        return budget || {
+            id: '', user_id: '', client_id: clients[0]?.id || '', title: '', status: 'Borrador',
+            items: [{ id: Math.random().toString(), description: '', quantity: 1, price: 0 }],
+            discount: 0, notes: '', created_at: new Date().toISOString()
+        }
+    }, [budget, clients]);
+
+    const [formData, setFormData] = useState<Budget>(initialBudget);
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({ ...prev, [name]: (name === 'discount') ? parseFloat(value) || 0 : value }));
+    };
+    
+    const handleItemChange = (index: number, field: keyof BudgetItem, value: string) => {
+        const newItems = [...formData.items];
+        const item = newItems[index];
+        if (field === 'quantity' || field === 'price') {
+            item[field] = parseFloat(value) || 0;
+        } else if (field === 'description') {
+            item[field] = value;
+        }
+        setFormData(prev => ({...prev, items: newItems}));
+    };
+
+    const addItem = () => {
+        setFormData(prev => ({...prev, items: [...prev.items, { id: Math.random().toString(), description: '', quantity: 1, price: 0 }]}));
+    };
+    
+    const removeItem = (index: number) => {
+        setFormData(prev => ({...prev, items: formData.items.filter((_, i) => i !== index)}));
+    };
+
+    const { subtotal, total } = useMemo(() => {
+        const sub = formData.items.reduce((acc, item) => acc + (item.quantity * item.price), 0);
+        const tot = sub - formData.discount;
+        return { subtotal: sub, total: tot };
+    }, [formData.items, formData.discount]);
+    
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!formData.client_id) {
+            alert("Por favor, selecciona un cliente.");
+            return;
+        }
+        onSave(formData);
+    };
+
+    return (
+         <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+                 <h2 className="text-2xl font-bold mb-6">{isNew ? 'Crear' : 'Editar'} Presupuesto</h2>
+                 <form onSubmit={handleSubmit} className="space-y-4">
+                     {/* Form fields */}
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                         <input type="text" name="title" value={formData.title} onChange={handleChange} placeholder="Título del Presupuesto" required className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600"/>
+                         <select name="client_id" value={formData.client_id} onChange={handleChange} required className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600">
+                             <option value="">-- Seleccionar Cliente --</option>
+                             {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                         </select>
+                         <input type="date" name="valid_until" value={formData.valid_until?.split('T')[0] || ''} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600"/>
+                         <select name="status" value={formData.status} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600">
+                             <option>Borrador</option><option>Enviado</option><option>Aceptado</option><option>Rechazado</option>
+                         </select>
+                     </div>
+
+                     {/* Items table */}
+                     <div className="border-y dark:border-gray-700 py-4">
+                        <h3 className="font-semibold mb-2">Items del Presupuesto</h3>
+                        {formData.items.map((item, index) => (
+                             <div key={item.id} className="grid grid-cols-12 gap-2 mb-2">
+                                 <input type="text" value={item.description} onChange={(e) => handleItemChange(index, 'description', e.target.value)} placeholder="Descripción" className="col-span-6 p-2 border rounded dark:bg-gray-700 dark:border-gray-600"/>
+                                 <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} placeholder="Cant." className="col-span-2 p-2 border rounded dark:bg-gray-700 dark:border-gray-600"/>
+                                 <input type="number" value={item.price} onChange={(e) => handleItemChange(index, 'price', e.target.value)} placeholder="Precio" className="col-span-3 p-2 border rounded dark:bg-gray-700 dark:border-gray-600"/>
+                                 <button type="button" onClick={() => removeItem(index)} className="col-span-1 p-2 text-red-500"><TrashIcon /></button>
+                             </div>
+                        ))}
+                         <button type="button" onClick={addItem} className="flex items-center text-primary-600 mt-2"><PlusIcon /> <span className="ml-1">Añadir Item</span></button>
+                     </div>
+                     
+                     {/* Summary */}
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <textarea name="notes" value={formData.notes || ''} onChange={handleChange} placeholder="Notas adicionales..." rows={4} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600"/>
+                        <div className="space-y-2 text-right">
+                             <p>Subtotal: {formatGuarani(subtotal)}</p>
+                             <div className="flex items-center justify-end">
+                                <label>Descuento:</label>
+                                <input type="number" name="discount" value={formData.discount} onChange={handleChange} className="w-24 p-1 border rounded dark:bg-gray-700 dark:border-gray-600 ml-2 text-right"/>
+                             </div>
+                             <p className="font-bold text-xl">Total: {formatGuarani(total)}</p>
+                        </div>
+                     </div>
+                     
+                     <div className="flex justify-end space-x-4 pt-4">
+                        <button type="button" onClick={onClose} className="px-4 py-2 rounded bg-gray-200 dark:bg-gray-600">Cancelar</button>
+                        <button type="submit" className="px-4 py-2 rounded bg-primary-600 text-white">Guardar Presupuesto</button>
+                    </div>
+                 </form>
+            </div>
+        </div>
+    )
+};
+
+const EmailBudgetModal: React.FC<{
+    budget: Budget;
+    currentUser: User;
+    onClose: () => void;
+    showAlert: (message: string, type: 'success' | 'error') => void;
+}> = ({ budget, currentUser, onClose, showAlert }) => {
+    const [recipientEmail, setRecipientEmail] = useState(budget.client?.email || '');
+    const [isSending, setIsSending] = useState(false);
+
+    const generatePdfBase64 = async (): Promise<string> => {
+        // This is a simplified version of the PDF export logic
+        const doc = new jsPDF();
+        doc.text(`Presupuesto: ${budget.title}`, 10, 10);
+        doc.text(`Cliente: ${budget.client?.name}`, 10, 20);
+        // ... (Add full PDF generation logic here)
+        autoTable(doc, {
+            head: [['Descripción', 'Cantidad', 'Precio Unit.', 'Total']],
+            body: budget.items.map(item => [item.description, item.quantity, formatGuarani(item.price), formatGuarani(item.quantity * item.price)]),
+        });
+        return doc.output('datauristring').split(',')[1];
+    };
+
+    const handleSend = async () => {
+        if (!recipientEmail) {
+            showAlert("Por favor, introduce un email.", "error");
+            return;
+        }
+        setIsSending(true);
+        const pdfBase64 = await generatePdfBase64();
+        
+        const { error } = await supabase.functions.invoke('send-budget-email', {
+            body: {
+                recipientEmail,
+                clientName: budget.client?.name,
+                companyName: currentUser.company_name,
+                pdfBase64,
+                budgetTitle: budget.title,
+            }
+        });
+
+        if (error) {
+            showAlert("Error al enviar el correo: " + error.message, 'error');
+        } else {
+            showAlert("Presupuesto enviado exitosamente.", 'success');
+            onClose();
+        }
+        setIsSending(false);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+            <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-xl w-full max-w-md">
+                 <h2 className="text-2xl font-bold mb-4">Enviar Presupuesto</h2>
+                 <p className="mb-6">Se enviará el PDF del presupuesto a la siguiente dirección de correo:</p>
+                 <input 
+                    type="email" 
+                    value={recipientEmail} 
+                    onChange={(e) => setRecipientEmail(e.target.value)}
+                    placeholder="Email del Cliente"
+                    className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600 mb-6"
+                    required
+                 />
+                 <div className="flex justify-end space-x-4">
+                    <button type="button" onClick={onClose} disabled={isSending} className="px-4 py-2 rounded bg-gray-200 dark:bg-gray-600">Cancelar</button>
+                    <button onClick={handleSend} disabled={isSending} className="px-4 py-2 rounded bg-primary-600 text-white disabled:bg-primary-300">
+                        {isSending ? 'Enviando...' : 'Confirmar y Enviar'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
 }
 
 export default App;
