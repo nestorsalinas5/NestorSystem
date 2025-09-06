@@ -1562,7 +1562,7 @@ const AnnouncementModal: React.FC<{
 }> = ({ announcement, onClose }) => {
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4">
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-2xl relative max-h-[90vh] overflow-y-auto">
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-11/12 md:w-auto max-w-4xl relative max-h-[90vh] overflow-y-auto">
                 <button onClick={onClose} className="absolute top-4 right-4 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 z-10">
                     <CloseIcon />
                 </button>
@@ -1572,7 +1572,7 @@ const AnnouncementModal: React.FC<{
                         <img 
                             src={announcement.image_url} 
                             alt={announcement.title} 
-                            className="w-full rounded-md max-h-[60vh] object-contain" 
+                            className="w-full rounded-md max-h-[70vh] object-contain" 
                         />
                     </div>
                 )}
