@@ -136,7 +136,8 @@ const App: React.FC = () => {
         }
 
         if (data && authUsers?.users) {
-            const usersWithEmails = (data as User[]).map((profile) => {
+            // FIX: Explicitly type the 'profile' parameter to help TypeScript's inference.
+            const usersWithEmails = (data as User[]).map((profile: User) => {
                 const authUser = authUsers.users.find(u => u.id === profile.id);
                 return { ...profile, email: authUser?.email };
             });
@@ -210,7 +211,7 @@ const App: React.FC = () => {
 
     const saveUser = async (user: User, password?: string) => {
         if (!user.id) {
-            if (!user.email || !password || !user.companyName || !user.activeUntil) {
+            if (!user.email || !password || !user.company_name || !user.activeUntil) {
                 alert("Todos los campos son requeridos para crear un usuario.");
                 return;
             }
@@ -219,7 +220,7 @@ const App: React.FC = () => {
                 body: { 
                     email: user.email, 
                     password: password,
-                    companyName: user.companyName,
+                    companyName: user.company_name,
                     activeUntil: user.activeUntil
                 },
             });
@@ -362,24 +363,111 @@ const DashboardAdmin: React.FC<{users: User[]}> = ({users}) => {
 };
 
 const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
-    const totalIncome = events.reduce((acc, event) => acc + event.amount_charged, 0);
-    const totalExpenses = events.reduce((acc, event) => acc + (event.expenses?.reduce((expAcc, exp) => expAcc + exp.amount, 0) || 0), 0);
+     const monthlyIncomeData = useMemo(() => {
+        const data: { [key: string]: number } = {};
+        const twelveMonthsAgo = new Date();
+        twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 11);
+        twelveMonthsAgo.setDate(1);
+
+        events.forEach(event => {
+            const eventDate = new Date(event.date);
+            if (eventDate >= twelveMonthsAgo) {
+                const monthKey = eventDate.toLocaleString('es-ES', { month: 'short', year: '2-digit' });
+                if (!data[monthKey]) {
+                    data[monthKey] = 0;
+                }
+                data[monthKey] += event.amount_charged;
+            }
+        });
+        
+        const sortedMonths = [];
+        for (let i = 0; i < 12; i++) {
+            const date = new Date();
+            date.setMonth(date.getMonth() - i);
+            const monthKey = date.toLocaleString('es-ES', { month: 'short', year: '2-digit' });
+            sortedMonths.unshift({
+                name: monthKey,
+                Ingresos: data[monthKey] || 0
+            });
+        }
+        return sortedMonths;
+    }, [events]);
+
+    const topClientsData = useMemo(() => {
+        const clientCount: { [key: string]: number } = {};
+        events.forEach(event => {
+            const clientName = event.client.name;
+            clientCount[clientName] = (clientCount[clientName] || 0) + 1;
+        });
+
+        return Object.entries(clientCount)
+            .map(([name, count]) => ({ name, Eventos: count }))
+            .sort((a, b) => b.Eventos - a.Eventos)
+            .slice(0, 5);
+    }, [events]);
+
+    const { totalIncome, totalExpenses, netProfit } = useMemo(() => {
+        const currentMonth = new Date().getMonth();
+        const currentYear = new Date().getFullYear();
+        
+        const monthEvents = events.filter(e => {
+            const eventDate = new Date(e.date);
+            return eventDate.getMonth() === currentMonth && eventDate.getFullYear() === currentYear;
+        });
+
+        const income = monthEvents.reduce((acc, event) => acc + event.amount_charged, 0);
+        const expenses = monthEvents.reduce((acc, event) => acc + (event.expenses?.reduce((expAcc, exp) => expAcc + exp.amount, 0) || 0), 0);
+        return { totalIncome: income, totalExpenses: expenses, netProfit: income - expenses };
+    }, [events]);
+
+
     return (
-         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-                <h3 className="text-lg font-semibold">Ingresos Totales</h3>
-                <p className="text-3xl font-bold text-green-500">{formatGuarani(totalIncome)}</p>
+        <div className="space-y-6">
+             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                    <h3 className="text-lg font-semibold">Ingresos (Mes Actual)</h3>
+                    <p className="text-3xl font-bold text-green-500">{formatGuarani(totalIncome)}</p>
+                </div>
+                <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                    <h3 className="text-lg font-semibold">Gastos (Mes Actual)</h3>
+                    <p className="text-3xl font-bold text-red-500">{formatGuarani(totalExpenses)}</p>
+                </div>
+                 <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                    <h3 className="text-lg font-semibold">Ganancia Neta (Mes Actual)</h3>
+                    <p className="text-3xl font-bold text-blue-500">{formatGuarani(netProfit)}</p>
+                </div>
             </div>
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-                <h3 className="text-lg font-semibold">Gastos Totales</h3>
-                <p className="text-3xl font-bold text-red-500">{formatGuarani(totalExpenses)}</p>
-            </div>
-             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-                <h3 className="text-lg font-semibold">Ganancia Neta</h3>
-                <p className="text-3xl font-bold text-blue-500">{formatGuarani(totalIncome - totalExpenses)}</p>
+            
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                 <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                    <h3 className="text-lg font-semibold mb-4">Tendencia de Ingresos (Últimos 12 Meses)</h3>
+                    <ResponsiveContainer width="100%" height={300}>
+                        <LineChart data={monthlyIncomeData}>
+                            <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
+                            <XAxis dataKey="name" />
+                            <YAxis tickFormatter={(value) => `${value/1000}k`} />
+                            <Tooltip formatter={(value: number) => formatGuarani(value)} />
+                            <Legend />
+                            <Line type="monotone" dataKey="Ingresos" stroke="#3b82f6" strokeWidth={2} />
+                        </LineChart>
+                    </ResponsiveContainer>
+                </div>
+                <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                    <h3 className="text-lg font-semibold mb-4">Top 5 Clientes</h3>
+                     <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={topClientsData} layout="vertical">
+                           <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
+                           <XAxis type="number" />
+                           <YAxis type="category" dataKey="name" width={80} />
+                           <Tooltip formatter={(value: number) => [`${value} eventos`, 'Total']} />
+                           <Legend />
+                           <Bar dataKey="Eventos" fill="#3b82f6" />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
             </div>
         </div>
-    )
+    );
 };
 
 const UserManagementPage: React.FC<{
@@ -390,7 +478,7 @@ const UserManagementPage: React.FC<{
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
     const handleOpenModal = (user: User | null) => {
-        const userToEdit: User = user ? { ...user } : { id: '', email: '', role: 'user', status: 'active', activeUntil: '', companyName: '' };
+        const userToEdit: User = user ? { ...user } : { id: '', email: '', role: 'user', status: 'active', activeUntil: '', company_name: '' };
         setSelectedUser(userToEdit);
         setIsModalOpen(true);
     };
@@ -421,7 +509,7 @@ const UserManagementPage: React.FC<{
                         {users.map(user => (
                             <tr key={user.id} className="border-b dark:border-gray-700">
                                 <td className="p-2">{user.email}</td>
-                                <td className="p-2">{user.companyName}</td>
+                                <td className="p-2">{user.company_name}</td>
                                 <td className="p-2">
                                     <span className={`px-2 py-1 rounded-full text-xs ${user.status === 'active' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'}`}>
                                         {user.status === 'active' ? 'Activo' : 'Inactivo'}
@@ -446,7 +534,7 @@ const UserFormModal: React.FC<{
     onSave: (user: User, password?: string) => void, 
     onClose: () => void 
 }> = ({ user, onSave, onClose }) => {
-    const [formData, setFormData] = useState<User>(user || { id: '', email: '', role: 'user', status: 'active', activeUntil: '', companyName: '' });
+    const [formData, setFormData] = useState<User>(user || { id: '', email: '', role: 'user', status: 'active', activeUntil: '', company_name: '' });
     const [password, setPassword] = useState('');
     const isNewUser = !user || !user.id;
 
@@ -471,7 +559,7 @@ const UserFormModal: React.FC<{
                     </div>
                      <div className="mb-4">
                         <label className="block mb-2">Nombre de Empresa</label>
-                        <input type="text" name="companyName" value={formData.companyName} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
+                        <input type="text" name="company_name" value={formData.company_name} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
                     </div>
                     {isNewUser && (
                         <div className="mb-4">
@@ -781,7 +869,7 @@ const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events,
            // doc.addImage(logoUrl, 'PNG', 14, 10, 30, 30);
         }
         doc.setFontSize(18);
-        doc.text(currentUser.companyName, logoUrl ? 50 : 14, 22);
+        doc.text(currentUser.company_name, logoUrl ? 50 : 14, 22);
         doc.setFontSize(12);
         doc.text(`Reporte de Eventos del ${new Date(startDate).toLocaleDateString()} al ${new Date(endDate).toLocaleDateString()}`, 14, 30);
 
@@ -904,29 +992,45 @@ const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events,
 
 const AgendaPage: React.FC<{ events: Event[] }> = ({ events }) => {
     const [currentDate, setCurrentDate] = useState(new Date());
+    const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
-    const eventDays = useMemo(() => {
-        const days = new Set<string>();
+    const eventsByDate = useMemo(() => {
+        const map = new Map<string, Event[]>();
         events.forEach(event => {
-            days.add(new Date(event.date).toISOString().split('T')[0]);
+            const dateStr = new Date(event.date).toISOString().split('T')[0];
+            if (!map.has(dateStr)) {
+                map.set(dateStr, []);
+            }
+            map.get(dateStr)!.push(event);
         });
-        return days;
+        return map;
     }, [events]);
+
+    const handleDayClick = (dateStr: string) => {
+        if (eventsByDate.has(dateStr)) {
+            setSelectedDate(dateStr);
+        }
+    };
 
     const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
     const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-    const startDay = startOfMonth.getDay(); // 0=Sunday, 1=Monday...
+    const startDay = startOfMonth.getDay();
     const daysInMonth = endOfMonth.getDate();
     
     const calendarDays = [];
     for (let i = 0; i < startDay; i++) {
-        calendarDays.push(<div key={`empty-${i}`} className="border dark:border-gray-700"></div>);
+        calendarDays.push(<div key={`empty-${i}`} className="border-t border-r dark:border-gray-700"></div>);
     }
     for (let day = 1; day <= daysInMonth; day++) {
-        const dateStr = new Date(currentDate.getFullYear(), currentDate.getMonth(), day).toISOString().split('T')[0];
-        const isEventDay = eventDays.has(dateStr);
+        const dayDate = new Date(Date.UTC(currentDate.getFullYear(), currentDate.getMonth(), day));
+        const dateStr = dayDate.toISOString().split('T')[0];
+        const isEventDay = eventsByDate.has(dateStr);
         calendarDays.push(
-            <div key={day} className={`border dark:border-gray-700 p-2 text-center ${isEventDay ? 'bg-primary-100 dark:bg-primary-900/50' : ''}`}>
+            <div 
+                key={day} 
+                className={`border-t border-r dark:border-gray-700 p-2 text-center h-24 flex flex-col items-center ${isEventDay ? 'cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/50' : ''}`}
+                onClick={() => handleDayClick(dateStr)}
+            >
                 <span className={`w-8 h-8 flex items-center justify-center rounded-full ${isEventDay ? 'bg-primary-500 text-white font-bold' : ''}`}>
                     {day}
                 </span>
@@ -938,6 +1042,8 @@ const AgendaPage: React.FC<{ events: Event[] }> = ({ events }) => {
         setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() + offset, 1));
     };
 
+    const selectedDateEvents = selectedDate ? eventsByDate.get(selectedDate) : [];
+
     return (
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
             <div className="flex justify-between items-center mb-4">
@@ -947,12 +1053,32 @@ const AgendaPage: React.FC<{ events: Event[] }> = ({ events }) => {
                 </h3>
                 <button onClick={() => changeMonth(1)} className="px-4 py-2 rounded bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600">Siguiente &gt;</button>
             </div>
-            <div className="grid grid-cols-7 gap-px bg-gray-200 dark:bg-gray-600">
+             <div className="grid grid-cols-7 border-l border-b dark:border-gray-700">
                  {['D', 'L', 'M', 'M', 'J', 'V', 'S'].map(day => (
-                    <div key={day} className="text-center font-bold p-2 bg-gray-100 dark:bg-gray-700">{day}</div>
+                    <div key={day} className="text-center font-bold p-2 bg-gray-100 dark:bg-gray-700 border-t border-r dark:border-gray-700">{day}</div>
                  ))}
                  {calendarDays}
             </div>
+
+            {selectedDate && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+                    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-lg">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-semibold">Eventos para el {new Date(selectedDate + 'T00:00:00').toLocaleDateString('es-ES', {weekday: 'long', day: 'numeric', month: 'long'})}</h3>
+                            <button onClick={() => setSelectedDate(null)}><CloseIcon /></button>
+                        </div>
+                        <ul className="space-y-3 max-h-80 overflow-y-auto">
+                            {selectedDateEvents?.map(event => (
+                                <li key={event.id} className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-md">
+                                    <p className="font-bold text-primary-600 dark:text-primary-400">{event.name}</p>
+                                    <p className="text-sm text-gray-600 dark:text-gray-400">Cliente: {event.client.name}</p>
+                                    <p className="text-sm text-gray-600 dark:text-gray-400">Lugar: {event.location}</p>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
@@ -971,7 +1097,6 @@ const SettingsPage: React.FC<{
         setUser(currentUser);
     }, [currentUser]);
 
-    // FIX: Removed extraneous underscore character `_` from arrow function definition, which was a syntax error.
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
             setLogoFile(e.target.files[0]);
@@ -999,7 +1124,7 @@ const SettingsPage: React.FC<{
             <form onSubmit={handleSubmit}>
                 <div className="mb-4">
                     <label className="block mb-2">Nombre de la Empresa</label>
-                    <input type="text" value={user.companyName} onChange={e => setUser({...user, companyName: e.target.value})} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
+                    <input type="text" value={user.company_name} onChange={e => setUser({...user, company_name: e.target.value})} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
                 </div>
                  <div className="mb-4">
                     <label className="block mb-2">Logo de la Empresa</label>
@@ -1080,7 +1205,7 @@ const Header: React.FC<{ currentPage: Page, currentUser: User, toggleTheme: () =
         <header className="flex justify-between items-center mb-6">
             <div>
                 <h2 className="text-3xl font-bold text-gray-800 dark:text-gray-100">{pageTitles[currentPage]}</h2>
-                <p className="text-md text-gray-500 dark:text-gray-400">Bienvenido, {currentUser.companyName}</p>
+                <p className="text-md text-gray-500 dark:text-gray-400">Bienvenido, {currentUser.company_name}</p>
             </div>
             <div className="flex items-center space-x-4">
                 {currentUser.role === 'user' && daysUntilExpiry <= 10 && (
