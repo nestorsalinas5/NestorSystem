@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Page, Event, Client, Expense, User } from './types';
+
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Page, Event, Client, Expense, User, Notification } from './types';
 import { getDashboardInsights } from './services/geminiService';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon } from './components/Icons.tsx';
+import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon } from './components/Icons.tsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { createClient, AuthSession, User as SupabaseUser } from '@supabase/supabase-js';
@@ -74,6 +75,8 @@ const App: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [alertState, setAlertState] = useState<AlertState>({ isOpen: false, message: '', type: 'success' });
+    const [notifications, setNotifications] = useState<Notification[]>([]);
+    const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
 
     const [users, setUsers] = useState<User[]>([]); // For admin view
     const [events, setEvents] = useState<Event[]>([]); // For user view
@@ -201,6 +204,60 @@ const App: React.FC = () => {
         fetchData();
     }, [currentUser, fetchAdminData, fetchUserData, fetchClients]);
 
+    useEffect(() => {
+        if (!currentUser || currentUser.role !== 'user') {
+            setNotifications([]);
+            return;
+        };
+
+        const newNotifications: Notification[] = [];
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+        // 1. License Expiry Notification
+        if (currentUser.activeUntil) {
+            const daysUntilExpiry = Math.ceil((new Date(currentUser.activeUntil).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+            if (daysUntilExpiry <= 10 && daysUntilExpiry >= 0) {
+                newNotifications.push({
+                    id: 'license-expiry',
+                    type: 'license',
+                    message: `Tu licencia vence en ${daysUntilExpiry} día${daysUntilExpiry !== 1 ? 's' : ''}.`,
+                    date: now.toISOString(),
+                });
+            }
+        }
+        
+        // 2. Upcoming Events Notification (next 7 days)
+        const sevenDaysFromNow = new Date(today);
+        sevenDaysFromNow.setDate(today.getDate() + 7);
+
+        events.forEach(event => {
+            const eventDate = new Date(event.date);
+            const eventDateOnly = new Date(eventDate.getUTCFullYear(), eventDate.getUTCMonth(), eventDate.getUTCDate());
+
+            if (eventDateOnly >= today && eventDateOnly <= sevenDaysFromNow) {
+                const daysUntilEvent = Math.ceil((eventDateOnly.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                let when = '';
+                if (daysUntilEvent === 0) {
+                    when = 'hoy';
+                } else if (daysUntilEvent === 1) {
+                    when = 'mañana';
+                } else {
+                    when = `en ${daysUntilEvent} días`;
+                }
+                newNotifications.push({
+                    id: `event-${event.id}`,
+                    type: 'event',
+                    message: `Evento próximo: "${event.name}" es ${when}.`,
+                    date: now.toISOString(),
+                });
+            }
+        });
+        
+        setNotifications(newNotifications);
+
+    }, [currentUser, events]);
+
     const handleLogout = async () => {
         await supabase.auth.signOut();
         setCurrentPage('dashboard');
@@ -243,6 +300,7 @@ const App: React.FC = () => {
     };
     
     const saveClient = async (client: Client) => {
+        const isNewClient = !client.id;
         const { id, name, phone, email } = client;
         const payload = { name, phone, email, user_id: currentUser!.id };
         const upsertData = id ? { ...payload, id } : payload;
@@ -251,8 +309,23 @@ const App: React.FC = () => {
         if (error) {
             showAlert("Error al guardar el cliente: " + error.message, 'error');
         } else {
-            showAlert(id ? "Cliente actualizado exitosamente." : "Cliente creado exitosamente.", 'success');
+            showAlert(isNewClient ? "Cliente creado exitosamente." : "Cliente actualizado exitosamente.", 'success');
             await fetchClients(currentUser!.id);
+
+            // Send welcome email if it's a new client with an email address
+            if (isNewClient && client.email) {
+                const { error: emailError } = await supabase.functions.invoke('send-welcome-email', {
+                    body: {
+                        name: client.name,
+                        email: client.email,
+                        djCompanyName: currentUser!.company_name
+                    },
+                });
+                if (emailError) {
+                    // Don't block the user, just log the error
+                    console.error("Failed to send welcome email:", emailError.message);
+                }
+            }
         }
     };
 
@@ -340,6 +413,9 @@ const App: React.FC = () => {
                             toggleTheme={toggleTheme}
                             theme={theme}
                             onMenuClick={() => setIsSidebarOpen(true)}
+                            notifications={notifications}
+                            isNotificationsOpen={isNotificationsOpen}
+                            setIsNotificationsOpen={setIsNotificationsOpen}
                         />
                         <PageContent
                             currentPage={currentPage}
@@ -1290,8 +1366,12 @@ const Header: React.FC<{
     currentUser: User, 
     toggleTheme: () => void, 
     theme: 'light' | 'dark',
-    onMenuClick: () => void
-}> = ({ currentPage, currentUser, toggleTheme, theme, onMenuClick }) => {
+    onMenuClick: () => void,
+    // FIX: Add missing props for notifications functionality.
+    notifications: Notification[];
+    isNotificationsOpen: boolean;
+    setIsNotificationsOpen: React.Dispatch<React.SetStateAction<boolean>>;
+}> = ({ currentPage, currentUser, toggleTheme, theme, onMenuClick, notifications, isNotificationsOpen, setIsNotificationsOpen }) => {
     const pageTitles: { [key in Page]: string } = {
         dashboard: 'Dashboard', events: 'Eventos', clients: 'Clientes', agenda: 'Agenda',
         reports: 'Reportes', settings: 'Configuración', userManagement: 'Gestión de Usuarios'
@@ -1321,6 +1401,33 @@ const Header: React.FC<{
                         <p>Tu licencia vence en {daysUntilExpiry} días.</p>
                     </div>
                 )}
+                {/* FIX: Add notification bell and dropdown UI. */}
+                <div className="relative">
+                    <button onClick={() => setIsNotificationsOpen(!isNotificationsOpen)} className="p-2 rounded-full bg-gray-200 dark:bg-gray-700 relative">
+                        <BellIcon />
+                        {notifications.length > 0 && (
+                            <span className="absolute top-0 right-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-800"></span>
+                        )}
+                    </button>
+                    {isNotificationsOpen && (
+                        <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 rounded-lg shadow-lg z-20 border dark:border-gray-700">
+                            <div className="p-3 font-semibold border-b dark:border-gray-700">Notificaciones</div>
+                            <ul className="divide-y dark:divide-gray-700 max-h-96 overflow-y-auto">
+                                {notifications.length > 0 ? notifications.map(n => (
+                                    <li key={n.id} className="p-3 flex items-start space-x-3 hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                        <div className="mt-1 flex-shrink-0">
+                                            {n.type === 'license' ? <WarningIcon /> : <EventsIcon />}
+                                        </div>
+                                        <div>
+                                            <p className="text-sm">{n.message}</p>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">{new Date(n.date).toLocaleString()}</p>
+                                        </div>
+                                    </li>
+                                )) : <li className="p-4 text-sm text-center text-gray-500">No hay notificaciones nuevas.</li>}
+                            </ul>
+                        </div>
+                    )}
+                </div>
                 <button onClick={toggleTheme} className="p-2 rounded-full bg-gray-200 dark:bg-gray-700">
                     {theme === 'light' ? <MoonIcon /> : <SunIcon />}
                 </button>
