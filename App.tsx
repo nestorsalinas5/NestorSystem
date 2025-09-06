@@ -1,7 +1,4 @@
 
-
-
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Page, Event, Client, Expense, User } from './types';
 import { getDashboardInsights } from './services/geminiService';
@@ -364,7 +361,7 @@ const DashboardAdmin: React.FC<{users: User[]}> = ({users}) => {
 };
 
 const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
-    const totalIncome = events.reduce((acc, event) => acc + event.amountCharged, 0);
+    const totalIncome = events.reduce((acc, event) => acc + event.amount_charged, 0);
     const totalExpenses = events.reduce((acc, event) => acc + (event.expenses?.reduce((expAcc, exp) => expAcc + exp.amount, 0) || 0), 0);
     return (
          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -545,13 +542,13 @@ const EventsPage: React.FC<{
                         {events.length === 0 && <tr><td colSpan={6} className="text-center p-4 text-gray-500">No has registrado ningún evento.</td></tr>}
                         {events.map(event => {
                             const eventExpenses = event.expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
-                            const netProfit = event.amountCharged - eventExpenses;
+                            const netProfit = event.amount_charged - eventExpenses;
                             return (
                                 <tr key={event.id} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
                                     <td className="p-2">{new Date(event.date).toLocaleDateString()}</td>
                                     <td className="p-2 font-medium">{event.name}</td>
                                     <td className="p-2">{event.client.name}</td>
-                                    <td className="p-2 text-green-600 dark:text-green-400">{formatGuarani(event.amountCharged)}</td>
+                                    <td className="p-2 text-green-600 dark:text-green-400">{formatGuarani(event.amount_charged)}</td>
                                     <td className={`p-2 font-semibold ${netProfit >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-red-500'}`}>{formatGuarani(netProfit)}</td>
                                     <td className="p-2 flex space-x-2">
                                         <button onClick={() => handleOpenModal(event)} className="text-primary-600 hover:underline">Editar</button>
@@ -581,7 +578,7 @@ const EventFormModal: React.FC<{
         client: event?.client || { name: '', phone: '', email: '' },
         location: event?.location || '',
         date: event?.date ? new Date(event.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-        amountCharged: event?.amountCharged || 0,
+        amount_charged: event?.amount_charged || 0,
         // FIX: Ensure expenses from DB have a temporary client-side ID for list keys and editing.
         expenses: (event?.expenses || []).map((exp, index) => ({
             ...exp,
@@ -606,10 +603,13 @@ const EventFormModal: React.FC<{
     // and fix type error when assigning to a string property.
     const handleExpenseChange = (index: number, field: 'type' | 'amount', value: string) => {
         const newExpenses = [...formData.expenses];
+        const currentExpense = newExpenses[index];
+        // FIX: Replaced usage of computed property name `[field]` to prevent TypeScript from inferring a `never` type.
+        // By explicitly setting `amount` or `type`, we ensure type safety.
         if (field === 'amount') {
-             newExpenses[index] = { ...newExpenses[index], [field]: Number(value) };
+             newExpenses[index] = { ...currentExpense, amount: Number(value) };
         } else {
-             newExpenses[index] = { ...newExpenses[index], [field]: value };
+             newExpenses[index] = { ...currentExpense, type: value };
         }
         setFormData(prev => ({ ...prev, expenses: newExpenses }));
     };
@@ -642,7 +642,7 @@ const EventFormModal: React.FC<{
                         <input type="text" name="name" placeholder="Nombre del Evento" value={formData.name} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
                         <input type="text" name="location" placeholder="Lugar" value={formData.location} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
                         <input type="date" name="date" value={formData.date} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
-                        <input type="number" name="amountCharged" placeholder="Monto Cobrado" value={formData.amountCharged} onChange={e => setFormData(prev => ({...prev, amountCharged: Number(e.target.value)}))} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
+                        <input type="number" name="amount_charged" placeholder="Monto Cobrado" value={formData.amount_charged} onChange={e => setFormData(prev => ({...prev, amount_charged: Number(e.target.value)}))} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
                     </div>
                     {/* Client Details */}
                     <div className="border-t pt-4 mt-4 dark:border-gray-700">
@@ -673,7 +673,7 @@ const EventFormModal: React.FC<{
                      {/* Observations & Summary */}
                     <div className="border-t pt-4 mt-4 dark:border-gray-700">
                         <textarea name="observations" placeholder="Observaciones..." value={formData.observations} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" rows={3}></textarea>
-                        <div className="text-right mt-2 text-lg font-bold">Ganancia Neta del Evento: {formatGuarani(formData.amountCharged - totalExpenses)}</div>
+                        <div className="text-right mt-2 text-lg font-bold">Ganancia Neta del Evento: {formatGuarani(formData.amount_charged - totalExpenses)}</div>
                     </div>
                     {/* Actions */}
                     <div className="flex justify-end space-x-4 mt-8">
@@ -749,7 +749,7 @@ const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events,
         let totalIncome = 0;
         let totalExpenses = 0;
         filteredEvents.forEach(event => {
-            totalIncome += event.amountCharged;
+            totalIncome += event.amount_charged;
             totalExpenses += event.expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
         });
         return { totalIncome, totalExpenses, netProfit: totalIncome - totalExpenses };
@@ -762,12 +762,12 @@ const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events,
 
         filteredEvents.forEach(event => {
             const eventExpenses = event.expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
-            const eventProfit = event.amountCharged - eventExpenses;
+            const eventProfit = event.amount_charged - eventExpenses;
             const eventData = [
                 new Date(event.date).toLocaleDateString(),
                 event.name,
                 event.client.name,
-                formatGuarani(event.amountCharged),
+                formatGuarani(event.amount_charged),
                 formatGuarani(eventExpenses),
                 formatGuarani(eventProfit)
             ];
@@ -806,7 +806,7 @@ const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events,
 
         filteredEvents.forEach(event => {
              const eventExpenses = event.expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
-             const eventProfit = event.amountCharged - eventExpenses;
+             const eventProfit = event.amount_charged - eventExpenses;
              const row = [
                  new Date(event.date).toLocaleDateString(),
                  `"${event.name.replace(/"/g, '""')}"`,
@@ -814,7 +814,7 @@ const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events,
                  event.client.phone,
                  event.client.email || '',
                  `"${event.location.replace(/"/g, '""')}"`,
-                 event.amountCharged,
+                 event.amount_charged,
                  eventExpenses,
                  eventProfit,
                  `"${(event.observations || '').replace(/"/g, '""')}"`
@@ -881,13 +881,13 @@ const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events,
                              {filteredEvents.length === 0 && <tr><td colSpan={5} className="text-center p-4 text-gray-500">No hay eventos en el rango de fechas seleccionado.</td></tr>}
                             {filteredEvents.map(event => {
                                 const eventExpenses = event.expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
-                                const netProfit = event.amountCharged - eventExpenses;
+                                const netProfit = event.amount_charged - eventExpenses;
                                 return (
                                     <tr key={event.id} className="border-b dark:border-gray-700">
                                         <td className="p-2">{new Date(event.date).toLocaleDateString()}</td>
                                         <td className="p-2 font-medium">{event.name}</td>
                                         <td className="p-2">{event.client.name}</td>
-                                        <td className="p-2 text-green-600 dark:text-green-400">{formatGuarani(event.amountCharged)}</td>
+                                        <td className="p-2 text-green-600 dark:text-green-400">{formatGuarani(event.amount_charged)}</td>
                                         <td className={`p-2 font-semibold ${netProfit >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-red-500'}`}>{formatGuarani(netProfit)}</td>
                                     </tr>
                                 )
