@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Page, Event, Client, Expense, User, Notification, Announcement } from './types';
 import { getDashboardInsights } from './services/geminiService';
@@ -568,20 +567,33 @@ const App: React.FC = () => {
     const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
     
     const saveEvent = async (event: Event) => {
-        const { client, ...eventData } = event;
+        const isNew = !event.id;
+        
+        // Destructure to remove properties not in the 'events' table
+        const { client, ...eventData } = event; 
+
+        // Prepare the base payload
         const payload = {
             ...eventData,
             user_id: currentUser!.id,
-            expenses: event.expenses.map(({ id, ...rest }) => rest), // Remove temp id
+            expenses: event.expenses.map(({ id, ...rest }) => rest), // Remove temp client-side id from expenses
         };
+        
+        // If it's a new event, delete the id property so the DB can generate it
+        if (isNew) {
+            delete (payload as any).id;
+        }
 
         const { error } = await supabase.from('events').upsert(payload);
-        if (error) showAlert('Error al guardar el evento: ' + error.message, 'error');
-        else {
+
+        if (error) {
+            showAlert('Error al guardar el evento: ' + error.message, 'error');
+        } else {
             showAlert('Evento guardado exitosamente.', 'success');
             await fetchUserData(currentUser!.id);
         }
     };
+
     const deleteEvent = async (eventId: string) => {
         if (window.confirm('¿Estás seguro de que quieres eliminar este evento?')) {
             const { error } = await supabase.from('events').delete().eq('id', eventId);
@@ -592,29 +604,25 @@ const App: React.FC = () => {
             }
         }
     };
+
     const saveClient = async (client: Client) => {
         const isNew = !client.id;
         
-        // Construct payload without the ID for inserts
-        const payload = {
+        const clientData = {
             name: client.name,
             phone: client.phone,
             email: client.email,
-            user_id: currentUser!.id
+            user_id: currentUser!.id,
         };
-        
-        // For updates, add the ID to the payload
-        if (!isNew) {
-            (payload as any).id = client.id;
-        }
 
-        const { error } = await supabase.from('clients').upsert(payload);
+        const { error } = isNew
+            ? await supabase.from('clients').insert(clientData)
+            : await supabase.from('clients').update(clientData).eq('id', client.id);
 
         if (error) {
             showAlert('Error al guardar el cliente: ' + error.message, 'error');
         } else {
             showAlert('Cliente guardado exitosamente.', 'success');
-            // Only send welcome email for new clients
             if (isNew && client.email) {
                  await supabase.functions.invoke('send-welcome-email', {
                     body: { email: client.email, name: client.name, djCompanyName: currentUser!.company_name },
@@ -623,6 +631,7 @@ const App: React.FC = () => {
             await fetchClients(currentUser!.id);
         }
     };
+    
     const deleteClient = async (clientId: string) => {
         if (window.confirm('¿Estás seguro de que quieres eliminar este cliente? Esto no eliminará sus eventos asociados.')) {
             const { error } = await supabase.from('clients').delete().eq('id', clientId);
