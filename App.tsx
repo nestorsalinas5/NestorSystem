@@ -1562,13 +1562,19 @@ const AnnouncementModal: React.FC<{
 }> = ({ announcement, onClose }) => {
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4">
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-lg relative">
-                <button onClick={onClose} className="absolute top-4 right-4 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-2xl relative max-h-[90vh] overflow-y-auto">
+                <button onClick={onClose} className="absolute top-4 right-4 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 z-10">
                     <CloseIcon />
                 </button>
-                <h2 className="text-2xl font-bold mb-4">{announcement.title}</h2>
+                <h2 className="text-2xl font-bold mb-4 pr-8">{announcement.title}</h2>
                 {announcement.image_url && (
-                    <img src={announcement.image_url} alt={announcement.title} className="w-full h-48 object-cover rounded-md mb-4" />
+                    <div className="mb-4">
+                        <img 
+                            src={announcement.image_url} 
+                            alt={announcement.title} 
+                            className="w-full rounded-md max-h-[60vh] object-contain" 
+                        />
+                    </div>
                 )}
                 <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{announcement.content}</p>
             </div>
