@@ -79,4 +79,17 @@ export interface Budget {
   created_at: string;
 }
 
-export type Page = 'dashboard' | 'events' | 'clients' | 'agenda' | 'reports' | 'settings' | 'userManagement' | 'announcements' | 'sendNotification' | 'budgets';
+export interface Inquiry {
+  id: string;
+  user_id: string;
+  client_name: string;
+  client_email?: string;
+  client_phone?: string;
+  event_type?: string;
+  event_date?: string;
+  message?: string;
+  status: 'Nueva' | 'Contactado' | 'Presupuesto Enviado';
+  created_at: string;
+}
+
+export type Page = 'dashboard' | 'events' | 'clients' | 'agenda' | 'reports' | 'settings' | 'userManagement' | 'announcements' | 'sendNotification' | 'budgets' | 'inquiries';
