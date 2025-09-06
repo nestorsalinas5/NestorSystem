@@ -77,6 +77,7 @@ const App: React.FC = () => {
 
     const [users, setUsers] = useState<User[]>([]); // For admin view
     const [events, setEvents] = useState<Event[]>([]); // For user view
+    const [clients, setClients] = useState<Client[]>([]); // For user view
 
     const showAlert = (message: string, type: 'success' | 'error' = 'error') => {
         setAlertState({ isOpen: true, message, type });
@@ -164,8 +165,18 @@ const App: React.FC = () => {
         setUsers(mappedUsers as User[]);
     }, []);
 
+    const fetchClients = useCallback(async (userId: string) => {
+        const { data, error } = await supabase.from('clients').select('*').eq('user_id', userId).order('name', { ascending: true });
+        if (error) {
+            console.error("Error fetching clients:", error);
+            showAlert("Error al cargar los clientes: " + error.message, 'error');
+        } else {
+            setClients(data as Client[] || []);
+        }
+    }, []);
+
     const fetchUserData = useCallback(async (userId: string) => {
-        const { data, error } = await supabase.from('events').select('*').eq('user_id', userId).order('date', { ascending: false });
+        const { data, error } = await supabase.from('events').select('*, client:clients(*)').eq('user_id', userId).order('date', { ascending: false });
         if (error) {
           console.error("Error fetching events:", error);
           showAlert("Error al cargar los eventos: " + error.message, 'error');
@@ -182,12 +193,13 @@ const App: React.FC = () => {
                 await fetchAdminData();
             } else {
                 await fetchUserData(currentUser.id);
+                await fetchClients(currentUser.id);
             }
             setLoading(false);
         };
 
         fetchData();
-    }, [currentUser, fetchAdminData, fetchUserData]);
+    }, [currentUser, fetchAdminData, fetchUserData, fetchClients]);
 
     const handleLogout = async () => {
         await supabase.auth.signOut();
@@ -197,8 +209,17 @@ const App: React.FC = () => {
     const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
     
     const saveEvent = async (event: Event) => {
-        const { id, expenses, name, client, location, date, amount_charged, observations } = event;
-        const payload = { name, client, location, date, amount_charged, observations, user_id: currentUser!.id, expenses: (expenses || []).map(({ type, amount }) => ({ type, amount })) };
+        const { id, expenses, name, client_id, location, date, amount_charged, observations } = event;
+        const payload = { 
+            name, 
+            client_id, 
+            location, 
+            date, 
+            amount_charged, 
+            observations, 
+            user_id: currentUser!.id, 
+            expenses: (expenses || []).map(({ type, amount }) => ({ type, amount })) 
+        };
         const upsertData = id ? { ...payload, id } : payload;
         
         const { data, error } = await supabase.from('events').upsert(upsertData).select().single();
@@ -219,6 +240,32 @@ const App: React.FC = () => {
                 await fetchUserData(currentUser!.id);
             }
         }
+    };
+    
+    const saveClient = async (client: Client) => {
+        const { id, name, phone, email } = client;
+        const payload = { name, phone, email, user_id: currentUser!.id };
+        const upsertData = id ? { ...payload, id } : payload;
+
+        const { error } = await supabase.from('clients').upsert(upsertData);
+        if (error) {
+            showAlert("Error al guardar el cliente: " + error.message, 'error');
+        } else {
+            showAlert(id ? "Cliente actualizado exitosamente." : "Cliente creado exitosamente.", 'success');
+            await fetchClients(currentUser!.id);
+        }
+    };
+
+    const deleteClient = async (clientId: string) => {
+         if (window.confirm('¿Estás seguro de que quieres eliminar este cliente? Esto no eliminará sus eventos asociados.')) {
+            const { error } = await supabase.from('clients').delete().match({ id: clientId });
+            if (error) {
+                showAlert("Error al eliminar el cliente: " + error.message, 'error');
+            } else {
+                showAlert("Cliente eliminado exitosamente.", 'success');
+                await fetchClients(currentUser!.id);
+            }
+         }
     };
 
     const saveUser = async (user: User, password?: string) => {
@@ -298,8 +345,11 @@ const App: React.FC = () => {
                             currentPage={currentPage}
                             currentUser={currentUser}
                             events={events}
+                            clients={clients}
                             saveEvent={saveEvent}
                             deleteEvent={deleteEvent}
+                            saveClient={saveClient}
+                            deleteClient={deleteClient}
                             users={users}
                             saveUser={saveUser}
                             uploadLogo={uploadLogo}
@@ -342,8 +392,11 @@ const PageContent: React.FC<{
     currentPage: Page;
     currentUser: User;
     events: Event[];
+    clients: Client[];
     saveEvent: (event: Event) => Promise<void>;
     deleteEvent: (id: string) => Promise<void>;
+    saveClient: (client: Client) => Promise<void>;
+    deleteClient: (id: string) => Promise<void>;
     users: User[];
     saveUser: (user: User, password?: string) => Promise<void>;
     uploadLogo: (userId: string, file: File) => Promise<string | null>;
@@ -354,9 +407,9 @@ const PageContent: React.FC<{
                 ? <DashboardAdmin users={props.users} /> 
                 : <DashboardUser events={props.events} />;
         case 'events':
-            return <EventsPage events={props.events} saveEvent={props.saveEvent} deleteEvent={props.deleteEvent} />;
+            return <EventsPage events={props.events} clients={props.clients} saveEvent={props.saveEvent} deleteEvent={props.deleteEvent} />;
         case 'clients':
-            return <ClientsPage events={props.events} />;
+            return <ClientsPage clients={props.clients} saveClient={props.saveClient} deleteClient={props.deleteClient} />;
         case 'agenda':
             return <AgendaPage events={props.events} />;
         case 'reports':
@@ -433,8 +486,10 @@ const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
     const topClientsData = useMemo(() => {
         const clientCount: { [key: string]: number } = {};
         events.forEach(event => {
-            const clientName = event.client.name;
-            clientCount[clientName] = (clientCount[clientName] || 0) + 1;
+            if (event.client) {
+                const clientName = event.client.name;
+                clientCount[clientName] = (clientCount[clientName] || 0) + 1;
+            }
         });
 
         return Object.entries(clientCount)
@@ -629,10 +684,11 @@ const UserFormModal: React.FC<{
 
 
 const EventsPage: React.FC<{
-    events: Event[], 
+    events: Event[],
+    clients: Client[],
     saveEvent: (event: Event) => Promise<void>, 
     deleteEvent: (id: string) => Promise<void>
-}> = ({ events, saveEvent, deleteEvent }) => {
+}> = ({ events, clients, saveEvent, deleteEvent }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
 
@@ -673,7 +729,7 @@ const EventsPage: React.FC<{
                                 <tr key={event.id} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
                                     <td className="p-2">{new Date(event.date).toLocaleDateString()}</td>
                                     <td className="p-2 font-medium">{event.name}</td>
-                                    <td className="p-2 hidden sm:table-cell">{event.client.name}</td>
+                                    <td className="p-2 hidden sm:table-cell">{event.client?.name || 'N/A'}</td>
                                     <td className="p-2 text-green-600 dark:text-green-400">{formatGuarani(event.amount_charged)}</td>
                                     <td className={`p-2 font-semibold hidden sm:table-cell ${netProfit >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-red-500'}`}>{formatGuarani(netProfit)}</td>
                                     <td className="p-2 flex space-x-2">
@@ -686,22 +742,24 @@ const EventsPage: React.FC<{
                     </tbody>
                 </table>
             </div>
-            {isModalOpen && <EventFormModal event={selectedEvent} onSave={handleSave} onClose={() => setIsModalOpen(false)} />}
+            {isModalOpen && <EventFormModal event={selectedEvent} clients={clients} onSave={handleSave} onClose={() => setIsModalOpen(false)} />}
         </div>
     );
 };
 
 const EventFormModal: React.FC<{
     event: Event | null,
+    clients: Client[],
     onSave: (event: Event) => void,
     onClose: () => void
-}> = ({ event, onSave, onClose }) => {
+}> = ({ event, clients, onSave, onClose }) => {
     const isNewEvent = !event;
     const initialEventState: Event = useMemo(() => ({
         id: event?.id || '',
         user_id: event?.user_id || '',
         name: event?.name || '',
-        client: event?.client || { name: '', phone: '', email: '' },
+        client_id: event?.client_id || (clients.length > 0 ? clients[0].id : null),
+        client: event?.client || null,
         location: event?.location || '',
         date: event?.date ? new Date(event.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         amount_charged: event?.amount_charged || 0,
@@ -710,18 +768,13 @@ const EventFormModal: React.FC<{
             id: (exp as any).id || `temp-${Date.now()}-${index}`,
         })),
         observations: event?.observations || '',
-    }), [event]);
+    }), [event, clients]);
 
     const [formData, setFormData] = useState<Event>(initialEventState);
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
-    };
-
-    const handleClientChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, client: { ...prev.client, [name]: value } }));
     };
     
     const handleExpenseChange = (index: number, field: 'type' | 'amount', value: string) => {
@@ -764,13 +817,22 @@ const EventFormModal: React.FC<{
                         <input type="date" name="date" value={formData.date} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
                         <input type="number" name="amount_charged" placeholder="Monto Cobrado" value={formData.amount_charged} onChange={e => setFormData(prev => ({...prev, amount_charged: Number(e.target.value)}))} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
                     </div>
-                    <div className="border-t pt-4 mt-4 dark:border-gray-700">
-                        <h3 className="font-semibold mb-2">Datos del Cliente</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <input type="text" name="name" placeholder="Nombre del Cliente" value={formData.client.name} onChange={handleClientChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
-                            <input type="tel" name="phone" placeholder="Teléfono" value={formData.client.phone} onChange={handleClientChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
-                            <input type="email" name="email" placeholder="Email (Opcional)" value={formData.client.email} onChange={handleClientChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
-                        </div>
+                     <div className="border-t pt-4 mt-4 dark:border-gray-700">
+                        <label htmlFor="client_id" className="font-semibold mb-2 block">Cliente</label>
+                        <select
+                            id="client_id"
+                            name="client_id"
+                            value={formData.client_id || ''}
+                            onChange={handleChange}
+                            className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600"
+                            required
+                        >
+                            <option value="" disabled>Selecciona un cliente</option>
+                            {clients.map(client => (
+                                <option key={client.id} value={client.id}>{client.name}</option>
+                            ))}
+                        </select>
+                        {clients.length === 0 && <p className="text-sm text-yellow-500 mt-2">No hay clientes registrados. Por favor, añade un cliente en la sección 'Clientes' primero.</p>}
                     </div>
                     <div className="border-t pt-4 mt-4 dark:border-gray-700">
                         <div className="flex justify-between items-center mb-2">
@@ -803,23 +865,30 @@ const EventFormModal: React.FC<{
 };
 
 
-const ClientsPage: React.FC<{ events: Event[] }> = ({ events }) => {
-    const clients = useMemo(() => {
-        const clientMap = new Map<string, { client: Client; eventCount: number }>();
-        events.forEach(event => {
-            const key = `${event.client.name}-${event.client.phone}`;
-            if (clientMap.has(key)) {
-                clientMap.get(key)!.eventCount++;
-            } else {
-                clientMap.set(key, { client: event.client, eventCount: 1 });
-            }
-        });
-        return Array.from(clientMap.values()).sort((a,b) => b.eventCount - a.eventCount);
-    }, [events]);
+const ClientsPage: React.FC<{ 
+    clients: Client[],
+    saveClient: (client: Client) => Promise<void>,
+    deleteClient: (id: string) => Promise<void>
+}> = ({ clients, saveClient, deleteClient }) => {
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+
+    const handleOpenModal = (client: Client | null) => {
+        setSelectedClient(client);
+        setIsModalOpen(true);
+    };
+
+    const handleSave = async (client: Client) => {
+        await saveClient(client);
+        setIsModalOpen(false);
+    };
 
     return (
         <div className="bg-white dark:bg-gray-800 p-4 md:p-6 rounded-lg shadow">
-            <h3 className="text-xl font-semibold mb-4">Mis Clientes</h3>
+             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
+                <h3 className="text-xl font-semibold">Mis Clientes</h3>
+                <button onClick={() => handleOpenModal(null)} className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 w-full md:w-auto">Añadir Cliente</button>
+            </div>
             <div className="overflow-x-auto">
                  <table className="w-full text-left">
                     <thead className="border-b dark:border-gray-700">
@@ -827,25 +896,77 @@ const ClientsPage: React.FC<{ events: Event[] }> = ({ events }) => {
                             <th className="p-2">Nombre</th>
                             <th className="p-2 hidden sm:table-cell">Teléfono</th>
                             <th className="p-2 hidden md:table-cell">Email</th>
-                            <th className="p-2 text-center">Eventos</th>
+                            <th className="p-2">Acciones</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {clients.length === 0 && <tr><td colSpan={4} className="text-center p-4 text-gray-500">No tienes clientes registrados en tus eventos.</td></tr>}
-                        {clients.map(({ client, eventCount }) => (
-                            <tr key={`${client.name}-${client.phone}`} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                        {clients.length === 0 && <tr><td colSpan={4} className="text-center p-4 text-gray-500">No tienes clientes registrados.</td></tr>}
+                        {clients.map((client) => (
+                            <tr key={client.id} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
                                 <td className="p-2 font-medium">{client.name}</td>
                                 <td className="p-2 hidden sm:table-cell">{client.phone}</td>
                                 <td className="p-2 hidden md:table-cell">{client.email || 'N/A'}</td>
-                                <td className="p-2 text-center font-bold text-primary-600">{eventCount}</td>
+                                <td className="p-2 flex space-x-2">
+                                    <button onClick={() => handleOpenModal(client)} className="text-primary-600 hover:underline">Editar</button>
+                                    <button onClick={() => deleteClient(client.id)} className="text-red-500 hover:underline">Eliminar</button>
+                                </td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
             </div>
+            {isModalOpen && <ClientFormModal client={selectedClient} onSave={handleSave} onClose={() => setIsModalOpen(false)} />}
         </div>
     );
 };
+
+const ClientFormModal: React.FC<{
+    client: Client | null,
+    onSave: (client: Client) => void,
+    onClose: () => void,
+}> = ({ client, onSave, onClose }) => {
+    const isNewClient = !client;
+    const initialClientState = useMemo(() => ({
+        id: client?.id || '',
+        user_id: client?.user_id || '',
+        name: client?.name || '',
+        phone: client?.phone || '',
+        email: client?.email || '',
+    }), [client]);
+
+    const [formData, setFormData] = useState<Client>(initialClientState);
+    
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onSave(formData);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+            <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-xl w-full max-w-md">
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-2xl font-bold">{isNewClient ? 'Añadir Nuevo Cliente' : 'Editar Cliente'}</h2>
+                    <button onClick={onClose}><CloseIcon /></button>
+                </div>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <input type="text" name="name" placeholder="Nombre Completo" value={formData.name} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
+                    <input type="tel" name="phone" placeholder="Número de Teléfono" value={formData.phone} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
+                    <input type="email" name="email" placeholder="Email (Opcional)" value={formData.email} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
+                     <div className="flex justify-end space-x-4 pt-4">
+                        <button type="button" onClick={onClose} className="px-4 py-2 rounded bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500">Cancelar</button>
+                        <button type="submit" className="px-4 py-2 rounded bg-primary-600 text-white hover:bg-primary-700">Guardar Cliente</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
 
 const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events, currentUser }) => {
     const [startDate, setStartDate] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
@@ -879,7 +1000,7 @@ const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events,
         filteredEvents.forEach(event => {
             const eventExpenses = event.expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
             const eventProfit = event.amount_charged - eventExpenses;
-            const eventData = [ new Date(event.date).toLocaleDateString(), event.name, event.client.name, formatGuarani(event.amount_charged), formatGuarani(eventExpenses), formatGuarani(eventProfit) ];
+            const eventData = [ new Date(event.date).toLocaleDateString(), event.name, event.client?.name || 'N/A', formatGuarani(event.amount_charged), formatGuarani(eventExpenses), formatGuarani(eventProfit) ];
             tableRows.push(eventData);
         });
 
@@ -903,7 +1024,7 @@ const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events,
         filteredEvents.forEach(event => {
              const eventExpenses = event.expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
              const eventProfit = event.amount_charged - eventExpenses;
-             const row = [ new Date(event.date).toLocaleDateString(), `"${event.name.replace(/"/g, '""')}"`, `"${event.client.name.replace(/"/g, '""')}"`, event.client.phone, event.client.email || '', `"${event.location.replace(/"/g, '""')}"`, event.amount_charged, eventExpenses, eventProfit, `"${(event.observations || '').replace(/"/g, '""')}"` ].join(',');
+             const row = [ new Date(event.date).toLocaleDateString(), `"${event.name.replace(/"/g, '""')}"`, `"${(event.client?.name || '').replace(/"/g, '""')}"`, event.client?.phone || '', event.client?.email || '', `"${event.location.replace(/"/g, '""')}"`, event.amount_charged, eventExpenses, eventProfit, `"${(event.observations || '').replace(/"/g, '""')}"` ].join(',');
             csvContent += row + "\r\n";
         });
         
@@ -960,7 +1081,7 @@ const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events,
                                     <tr key={event.id} className="border-b dark:border-gray-700">
                                         <td className="p-2">{new Date(event.date).toLocaleDateString()}</td>
                                         <td className="p-2 font-medium">{event.name}</td>
-                                        <td className="p-2 hidden sm:table-cell">{event.client.name}</td>
+                                        <td className="p-2 hidden sm:table-cell">{event.client?.name || 'N/A'}</td>
                                         <td className="p-2 text-green-600 dark:text-green-400">{formatGuarani(event.amount_charged)}</td>
                                         <td className={`p-2 font-semibold hidden sm:table-cell ${netProfit >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-red-500'}`}>{formatGuarani(netProfit)}</td>
                                     </tr>
@@ -1056,7 +1177,7 @@ const AgendaPage: React.FC<{ events: Event[] }> = ({ events }) => {
                             {selectedDateEvents?.map(event => (
                                 <li key={event.id} className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-md">
                                     <p className="font-bold text-primary-600 dark:text-primary-400">{event.name}</p>
-                                    <p className="text-sm text-gray-600 dark:text-gray-400">Cliente: {event.client.name}</p>
+                                    <p className="text-sm text-gray-600 dark:text-gray-400">Cliente: {event.client?.name || 'N/A'}</p>
                                     <p className="text-sm text-gray-600 dark:text-gray-400">Lugar: {event.location}</p>
                                 </li>
                             ))}
