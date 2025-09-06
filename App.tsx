@@ -1,4 +1,6 @@
 
+
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Page, Event, Client, Expense, User, Notification, Announcement } from './types';
 import { getDashboardInsights } from './services/geminiService';
@@ -1269,47 +1271,87 @@ const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events,
 
     const exportToPDF = () => {
         const doc = new jsPDF();
-        const tableColumn = ["Evento", "Cliente", "Fecha", "Ingreso", "Gastos", "Ganancia"];
-        const tableRows: any[] = [];
+        // FIX: Cast 'bold' to the correct FontStyle literal type for jspdf-autotable.
+        const headStyles = { fillColor: '#2563eb', textColor: '#ffffff', fontStyle: 'bold' as 'bold' };
+        const subHeaderStyles = { fillColor: '#e0e7ff', textColor: '#1e3a8a', fontStyle: 'bold' as 'bold', fontSize: 9 };
+        const expenseRowStyles = { fillColor: '#f3f4f6', textColor: '#4b5563', fontSize: 9 };
+
+        const body: any[] = [];
 
         filteredEvents.forEach(event => {
-            const eventExpenses = event.expenses.reduce((sum, exp) => sum + exp.amount, 0);
-            const net = event.amount_charged - eventExpenses;
-            const eventData = [
-                event.name,
+            const eventExpensesTotal = event.expenses.reduce((sum, exp) => sum + exp.amount, 0);
+            const net = event.amount_charged - eventExpensesTotal;
+            
+            // Main event row with alternating styles
+            body.push([
+                // FIX: Cast 'bold' to the correct FontStyle literal type for jspdf-autotable.
+                { content: event.name, styles: { fontStyle: 'bold' as 'bold' } },
                 event.client?.name || 'N/A',
                 new Date(event.date).toLocaleDateString(),
                 formatGuarani(event.amount_charged),
-                formatGuarani(eventExpenses),
-                formatGuarani(net)
-            ];
-            tableRows.push(eventData);
+                formatGuarani(eventExpensesTotal),
+                formatGuarani(net),
+            ]);
+
+            // Add expense breakdown if there are any
+            if (event.expenses.length > 0) {
+                event.expenses.forEach(expense => {
+                    body.push([
+                        { content: `  └ ${expense.type}`, colSpan: 4, styles: expenseRowStyles },
+                        { content: formatGuarani(expense.amount), colSpan: 2, styles: { ...expenseRowStyles, halign: 'right' } }
+                    ]);
+                });
+            }
         });
 
         autoTable(doc, {
-            head: [tableColumn],
-            body: tableRows,
-            startY: 30,
+            head: [["Evento", "Cliente", "Fecha", "Ingreso", "Gastos", "Ganancia"]],
+            body: body,
+            startY: 40,
+            headStyles: headStyles,
+            theme: 'grid',
+            alternateRowStyles: { fillColor: [249, 250, 251] }, // very light gray for main event rows
             didDrawPage: (data) => {
                 // Header
-                if (currentUser.companyLogoUrl) {
-                     try {
-                        const img = new Image();
-                        img.src = currentUser.companyLogoUrl;
-                        img.crossOrigin = "anonymous";
-                        doc.addImage(img, 'PNG', data.settings.margin.left, 15, 10, 10);
-                     } catch(e) { console.error("Error adding image to PDF:", e)}
-                }
-                doc.text(currentUser.company_name, data.settings.margin.left + 12, 22);
-                doc.text(`Reporte de Eventos del ${startDate} al ${endDate}`, 14, 10);
+                doc.setFontSize(20);
+                doc.setFont('helvetica', 'bold');
+                doc.setTextColor(41, 100, 235); // primary-600
+                doc.text(currentUser.company_name, data.settings.margin.left, 20);
+                
+                doc.setFontSize(12);
+                doc.setFont('helvetica', 'normal');
+                doc.setTextColor(40);
+                doc.text(`Reporte de Eventos del ${new Date(startDate).toLocaleDateString()} al ${new Date(endDate).toLocaleDateString()}`, data.settings.margin.left, 28);
+
+                // Footer
+                const pageCount = (doc as any).internal.getNumberOfPages ? (doc as any).internal.getNumberOfPages() : 0;
+                doc.setFontSize(8);
+                doc.setTextColor(150);
+                doc.text(`Generado por GestionSystemDj`, data.settings.margin.left, doc.internal.pageSize.height - 10);
+                doc.text(`Página ${data.pageNumber} de ${pageCount}`, doc.internal.pageSize.width / 2, doc.internal.pageSize.height - 10, { align: 'center' });
             },
+            margin: { top: 35 }
         });
+
+        const finalY = (doc as any).lastAutoTable.finalY || 40;
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(40);
+        doc.text('Resumen del Período', 14, finalY + 15);
         
-        // Add totals at the end
-        const finalY = (doc as any).lastAutoTable.finalY || 30;
-        doc.text(`Total Ingresos: ${formatGuarani(totals.income)}`, 14, finalY + 10);
-        doc.text(`Total Gastos: ${formatGuarani(totals.expenses)}`, 14, finalY + 17);
-        doc.text(`Ganancia Neta Total: ${formatGuarani(totals.net)}`, 14, finalY + 24);
+        autoTable(doc, {
+            body: [
+                ['Total Ingresos:', { content: formatGuarani(totals.income), styles: { halign: 'right' }}],
+                ['Total Gastos:', { content: formatGuarani(totals.expenses), styles: { halign: 'right' }}],
+                // FIX: Cast 'bold' to the correct FontStyle literal type for jspdf-autotable.
+                [{ content: 'Ganancia Neta Total:', styles: { fontStyle: 'bold' as 'bold' } }, { content: formatGuarani(totals.net), styles: { fontStyle: 'bold' as 'bold', halign: 'right' } }],
+            ],
+            startY: finalY + 18,
+            theme: 'plain',
+            tableWidth: 'wrap',
+            styles: { cellPadding: 2, fontSize: 10 },
+            columnStyles: { 0: { cellWidth: 40 } },
+        });
 
         doc.save(`Reporte_GestionSystem_${startDate}_${endDate}.pdf`);
     };
