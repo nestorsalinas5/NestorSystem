@@ -593,13 +593,29 @@ const App: React.FC = () => {
         }
     };
     const saveClient = async (client: Client) => {
-        const payload = { ...client, user_id: currentUser!.id };
+        const isNew = !client.id;
+        
+        // Construct payload without the ID for inserts
+        const payload = {
+            name: client.name,
+            phone: client.phone,
+            email: client.email,
+            user_id: currentUser!.id
+        };
+        
+        // For updates, add the ID to the payload
+        if (!isNew) {
+            (payload as any).id = client.id;
+        }
+
         const { error } = await supabase.from('clients').upsert(payload);
 
-        if (error) showAlert('Error al guardar el cliente: ' + error.message, 'error');
-        else {
+        if (error) {
+            showAlert('Error al guardar el cliente: ' + error.message, 'error');
+        } else {
             showAlert('Cliente guardado exitosamente.', 'success');
-            if (client.email) {
+            // Only send welcome email for new clients
+            if (isNew && client.email) {
                  await supabase.functions.invoke('send-welcome-email', {
                     body: { email: client.email, name: client.name, djCompanyName: currentUser!.company_name },
                 });
