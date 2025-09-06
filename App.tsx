@@ -679,7 +679,7 @@ const App: React.FC = () => {
         else setEvents(eventsData as Event[] || []);
         
         // Active Announcement
-        const { data: announcementData, error: announcementError } = await supabase.from('announcements').select('*').eq('is_active', true).single();
+        const { data: announcementData, error: announcementError } = await supabase.from('announcements').select('*').eq('is_active', true).limit(1).single();
         if(announcementData && !announcementError) {
              const announcementId = announcementData.id;
              const hasSeen = sessionStorage.getItem(`seen_announcement_${announcementId}`);
@@ -713,6 +713,7 @@ const App: React.FC = () => {
     }, [currentUser, fetchAdminData, fetchUserData, fetchClients, fetchBudgets]);
 
     const handleLogout = async () => {
+        sessionStorage.clear(); // Clear session storage on logout
         await supabase.auth.signOut();
         setCurrentPage('dashboard');
     };
@@ -721,17 +722,21 @@ const App: React.FC = () => {
     
     const saveEvent = async (event: Event) => {
         const isNew = !event.id;
-        const { id, client, ...eventData } = event;
-    
-        const payload = {
-            ...eventData,
-            user_id: currentUser!.id,
-            expenses: event.expenses.map(({ id: expenseId, ...rest }) => rest),
-        };
         
+        const payload: any = {
+            user_id: currentUser!.id,
+            client_id: event.client_id,
+            name: event.name,
+            location: event.location,
+            date: event.date,
+            amount_charged: event.amount_charged,
+            expenses: event.expenses.map(({ id: expenseId, ...rest }) => rest),
+            observations: event.observations,
+        };
+
         const query = isNew
             ? supabase.from('events').insert(payload)
-            : supabase.from('events').update(payload).eq('id', id);
+            : supabase.from('events').update(payload).eq('id', event.id);
 
         const { error } = await query;
 
@@ -771,13 +776,19 @@ const App: React.FC = () => {
 
     const saveClient = async (client: Client) => {
         const isNew = !client.id;
-        const { id, ...clientData } = client;
         
-        const payload = isNew ? { ...clientData, user_id: currentUser!.id } : { ...clientData };
+        const payload: any = {
+            user_id: currentUser!.id,
+            name: client.name,
+            phone: client.phone,
+            email: client.email,
+        };
+        
+        const query = isNew
+            ? supabase.from('clients').insert(payload)
+            : supabase.from('clients').update(payload).eq('id', client.id);
 
-        const { error } = isNew
-            ? await supabase.from('clients').insert(payload)
-            : await supabase.from('clients').update(payload).eq('id', id);
+        const { error } = await query;
 
         if (error) {
             showAlert('Error al guardar el cliente: ' + error.message, 'error');
@@ -928,16 +939,23 @@ const App: React.FC = () => {
     
     const saveBudget = async (budget: Budget) => {
         const isNew = !budget.id;
-        const { id, client, ...budgetData } = budget;
+        
+        const payload: any = {
+            user_id: currentUser!.id,
+            client_id: budget.client_id,
+            title: budget.title,
+            status: budget.status,
+            items: budget.items.map(({ id: itemId, ...rest }) => rest),
+            discount: budget.discount,
+            notes: budget.notes,
+            valid_until: budget.valid_until,
+        };
+        
+        const query = isNew
+            ? supabase.from('budgets').insert(payload)
+            : supabase.from('budgets').update(payload).eq('id', budget.id);
 
-        const payload = isNew
-            ? { ...budgetData, user_id: currentUser!.id, items: budget.items.map(({ id: itemId, ...rest }) => rest) }
-            : { ...budgetData, items: budget.items.map(({ id: itemId, ...rest }) => rest) };
-
-
-        const { error } = isNew
-            ? await supabase.from('budgets').insert(payload)
-            : await supabase.from('budgets').update(payload).eq('id', id);
+        const { error } = await query;
 
         if (error) {
             showAlert('Error al guardar el presupuesto: ' + error.message, 'error');
