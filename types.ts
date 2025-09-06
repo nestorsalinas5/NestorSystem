@@ -1,5 +1,7 @@
 
 export interface Client {
+  id: string; // From Supabase
+  user_id: string;
   name: string;
   phone: string;
   email?: string;
@@ -15,7 +17,8 @@ export interface Event {
   id: string; // Will be a UUID from Supabase
   user_id: string; // Associate event with a user
   name: string;
-  client: Client;
+  client_id: string | null; // Foreign key to the clients table
+  client: Client | null; // To hold the joined client data
   location: string;
   date: string; // ISO string format
   amount_charged: number;
