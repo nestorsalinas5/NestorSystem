@@ -18,7 +18,6 @@ export interface Event {
   user_id: string; // Associate event with a user
   client_id: string | null; // Foreign key to the clients table
   client: Client | null; // To hold the joined client data
-  // FIX: Add missing 'name' property to the Event interface.
   name: string;
   location: string;
   date: string; // ISO string format
@@ -40,13 +39,22 @@ export interface User {
   companyLogoUrl?: string; // URL from Supabase Storage
 }
 
-export type NotificationType = 'event' | 'license';
+export interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+  image_url?: string;
+  is_active: boolean;
+  created_at: string;
+}
 
 export interface Notification {
   id: string;
-  type: NotificationType;
+  user_id: string;
   message: string;
-  date: string; // ISO string when the notification was generated
+  type: string; // 'announcement', 'license', 'event', etc.
+  is_read: boolean;
+  created_at: string;
 }
 
-export type Page = 'dashboard' | 'events' | 'clients' | 'agenda' | 'reports' | 'settings' | 'userManagement';
+export type Page = 'dashboard' | 'events' | 'clients' | 'agenda' | 'reports' | 'settings' | 'userManagement' | 'announcements' | 'sendNotification';
