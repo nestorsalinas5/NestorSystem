@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus } from './types';
 import { getDashboardInsights } from './services/geminiService';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon } from './components/Icons.tsx';
+import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, PdfIcon, EditIcon, EmailIcon } from './components/Icons.tsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { createClient, AuthSession, User as SupabaseUser } from '@supabase/supabase-js';
@@ -418,6 +417,138 @@ const SettingsPage: React.FC<{
     );
 };
 
+// --- PDF Generation Helper ---
+const getBase64ImageFromUrl = (url: string): Promise<string | null> => {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return resolve(null);
+            ctx.drawImage(img, 0, 0);
+            const dataURL = canvas.toDataURL('image/png');
+            resolve(dataURL);
+        };
+        img.onerror = () => resolve(null);
+        img.src = url;
+    });
+};
+
+const generateBudgetPDF = async (budget: Budget, currentUser: User, client: Client | undefined) => {
+    const doc = new jsPDF();
+    const pageMargin = 15;
+    const cellPadding = 2;
+    const headStyles = { fillColor: '#2563eb', textColor: '#ffffff', fontStyle: 'bold' as 'bold' };
+    
+    // --- PDF Header ---
+    const logoDataUrl = currentUser.companyLogoUrl ? await getBase64ImageFromUrl(currentUser.companyLogoUrl) : null;
+    if (logoDataUrl) {
+        doc.addImage(logoDataUrl, 'PNG', pageMargin, 15, 25, 25);
+    }
+    
+    doc.setFontSize(22);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor('#1d4ed8');
+    doc.text(currentUser.company_name, logoDataUrl ? pageMargin + 30 : pageMargin, 25);
+    
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100);
+    doc.text(`Presupuesto / Cotización`, logoDataUrl ? pageMargin + 30 : pageMargin, 32);
+
+    // --- Client and Budget Info ---
+    doc.setFontSize(10);
+    doc.setDrawColor(200);
+    doc.line(pageMargin, 50, doc.internal.pageSize.width - pageMargin, 50);
+
+    doc.text("CLIENTE:", pageMargin, 58);
+    doc.setFont('helvetica', 'bold');
+    doc.text(client?.name || 'N/A', pageMargin, 63);
+    doc.setFont('helvetica', 'normal');
+    doc.text(client?.phone || '', pageMargin, 68);
+    doc.text(client?.email || '', pageMargin, 73);
+
+    const rightAlignX = doc.internal.pageSize.width - pageMargin;
+    doc.text("NÚMERO DE PRESUPUESTO:", rightAlignX, 58, { align: 'right' });
+    doc.text("FECHA DE EMISIÓN:", rightAlignX, 68, { align: 'right' });
+    doc.text("VÁLIDO HASTA:", rightAlignX, 73, { align: 'right' });
+
+    doc.setFont('helvetica', 'bold');
+    doc.text(budget.id.substring(0, 8).toUpperCase(), rightAlignX, 63, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    doc.text(new Date(budget.created_at).toLocaleDateString(), rightAlignX, 68, { align: 'right' });
+    doc.text(budget.valid_until ? new Date(budget.valid_until).toLocaleDateString() : 'N/A', rightAlignX, 73, { align: 'right' });
+
+
+    // --- Items Table ---
+    const subtotal = budget.items.reduce((acc, item) => acc + item.quantity * item.price, 0);
+    const total = subtotal - budget.discount;
+    
+    const tableBody = budget.items.map(item => [
+        item.description,
+        item.quantity,
+        formatGuarani(item.price),
+        formatGuarani(item.quantity * item.price)
+    ]);
+
+    autoTable(doc, {
+        startY: 85,
+        head: [['Descripción', 'Cantidad', 'Precio Unit.', 'Total']],
+        body: tableBody,
+        theme: 'grid',
+        headStyles: headStyles,
+        styles: { fontSize: 9, cellPadding },
+        columnStyles: {
+            1: { halign: 'center' },
+            2: { halign: 'right' },
+            3: { halign: 'right' }
+        },
+        didDrawPage: (data) => {
+            // --- PDF Footer ---
+            const pageCount = (doc as any).internal.getNumberOfPages ? (doc as any).internal.getNumberOfPages() : 0;
+            doc.setFontSize(8);
+            doc.setTextColor(150);
+            doc.text(`Generado por GestionSystemDj`, data.settings.margin.left, doc.internal.pageSize.height - 10);
+            doc.text(`Página ${data.pageNumber} de ${pageCount}`, doc.internal.pageSize.width - data.settings.margin.right, doc.internal.pageSize.height - 10, { align: 'right' });
+        }
+    });
+
+    // --- Totals Section ---
+    const finalY = (doc as any).lastAutoTable.finalY;
+    autoTable(doc, {
+        startY: finalY + 10,
+        theme: 'plain',
+        tableWidth: 'wrap',
+        margin: { left: doc.internal.pageSize.width - 80 - pageMargin },
+        body: [
+            ['Subtotal:', { content: formatGuarani(subtotal), styles: { halign: 'right' } }],
+            ['Descuento:', { content: formatGuarani(budget.discount), styles: { halign: 'right' } }],
+            [{
+                content: 'TOTAL:',
+                styles: { fontStyle: 'bold', fontSize: 12 }
+            }, {
+                content: formatGuarani(total),
+                styles: { fontStyle: 'bold', fontSize: 12, halign: 'right' }
+            }],
+        ],
+        styles: { fontSize: 10, cellPadding },
+    });
+
+    // --- Notes Section ---
+    if (budget.notes) {
+        doc.setFontSize(9);
+        doc.setTextColor(120);
+        doc.text("Notas:", pageMargin, finalY + 15);
+        doc.text(doc.splitTextToSize(budget.notes, doc.internal.pageSize.width - 120), pageMargin, finalY + 20);
+    }
+    
+    return doc;
+};
+
+
 // Main App Component
 const App: React.FC = () => {
     const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') as 'light' | 'dark') || 'light');
@@ -579,7 +710,7 @@ const App: React.FC = () => {
     const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
     
     const saveEvent = async (event: Event) => {
-        const { client, id, ...eventData } = event; 
+        const { client, id, ...eventData } = event;
         const isNew = !id;
 
         const payload = {
@@ -1355,30 +1486,6 @@ const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events,
         return { income, expenses, net: income - expenses };
     }, [filteredEvents]);
 
-    const getBase64ImageFromUrl = (url: string): Promise<string | null> => {
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.crossOrigin = 'Anonymous';
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                canvas.width = img.width;
-                canvas.height = img.height;
-                const ctx = canvas.getContext('2d');
-                if (!ctx) {
-                    return resolve(null);
-                }
-                ctx.drawImage(img, 0, 0);
-                const dataURL = canvas.toDataURL('image/png');
-                resolve(dataURL);
-            };
-            img.onerror = error => {
-                console.error("Error loading image for PDF:", error);
-                resolve(null);
-            };
-            img.src = url;
-        });
-    }
-
     const exportToPDF = async () => {
         const doc = new jsPDF();
         const headStyles = { fillColor: '#2563eb', textColor: '#ffffff', fontStyle: 'bold' as 'bold' };
@@ -1683,6 +1790,12 @@ const BudgetsPage: React.FC<{
         setIsEmailModalOpen(true);
     };
     
+    const handleViewPdf = async (budget: Budget) => {
+        const client = clients.find(c => c.id === budget.client_id);
+        const doc = await generateBudgetPDF(budget, currentUser, client);
+        window.open(doc.output('bloburl'), '_blank');
+    };
+
     return (
         <div className="bg-white dark:bg-gray-800 p-4 md:p-6 rounded-lg shadow">
             <div className="flex justify-between items-center mb-4">
@@ -1703,10 +1816,21 @@ const BudgetsPage: React.FC<{
                                 <td className="p-2">{budget.client?.name || 'N/A'}</td>
                                 <td className="p-2">{new Date(budget.created_at).toLocaleDateString()}</td>
                                 <td className="p-2">{budget.status}</td>
-                                <td className="p-2 flex space-x-2">
-                                    <button onClick={() => handleOpenModal(budget)} className="text-primary-600 hover:underline">Editar</button>
-                                    <button onClick={() => deleteBudget(budget.id)} className="text-red-500 hover:underline">Eliminar</button>
-                                    <button onClick={() => handleOpenEmailModal(budget)} className="text-green-600 hover:underline">Enviar</button>
+                                <td className="p-2">
+                                    <div className="flex items-center space-x-2">
+                                        <button title="Ver PDF" onClick={() => handleViewPdf(budget)} className="p-1.5 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700">
+                                            <PdfIcon />
+                                        </button>
+                                        <button title="Enviar por Correo" onClick={() => handleOpenEmailModal(budget)} className="p-1.5 rounded text-green-600 hover:bg-green-100 dark:hover:bg-green-900/50">
+                                            <EmailIcon />
+                                        </button>
+                                        <button title="Editar" onClick={() => handleOpenModal(budget)} className="p-1.5 rounded text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900/50">
+                                            <EditIcon />
+                                        </button>
+                                        <button title="Eliminar" onClick={() => deleteBudget(budget.id)} className="p-1.5 rounded text-red-600 hover:bg-red-100 dark:hover:bg-red-900/50">
+                                            <TrashIcon />
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                         ))}
@@ -1714,7 +1838,7 @@ const BudgetsPage: React.FC<{
                 </table>
             </div>
             {isModalOpen && <BudgetFormModal budget={selectedBudget} clients={clients} onSave={handleSave} onClose={() => setIsModalOpen(false)} />}
-            {isEmailModalOpen && budgetToSend && <EmailBudgetModal budget={budgetToSend} currentUser={currentUser} onClose={() => setIsEmailModalOpen(false)} showAlert={showAlert} />}
+            {isEmailModalOpen && budgetToSend && <EmailBudgetModal budget={budgetToSend} currentUser={currentUser} clients={clients} onClose={() => setIsEmailModalOpen(false)} showAlert={showAlert} />}
         </div>
     );
 };
@@ -1833,24 +1957,12 @@ const BudgetFormModal: React.FC<{
 const EmailBudgetModal: React.FC<{
     budget: Budget;
     currentUser: User;
+    clients: Client[];
     onClose: () => void;
     showAlert: (message: string, type: 'success' | 'error') => void;
-}> = ({ budget, currentUser, onClose, showAlert }) => {
+}> = ({ budget, currentUser, clients, onClose, showAlert }) => {
     const [recipientEmail, setRecipientEmail] = useState(budget.client?.email || '');
     const [isSending, setIsSending] = useState(false);
-
-    const generatePdfBase64 = async (): Promise<string> => {
-        // This is a simplified version of the PDF export logic
-        const doc = new jsPDF();
-        doc.text(`Presupuesto: ${budget.title}`, 10, 10);
-        doc.text(`Cliente: ${budget.client?.name}`, 10, 20);
-        // ... (Add full PDF generation logic here)
-        autoTable(doc, {
-            head: [['Descripción', 'Cantidad', 'Precio Unit.', 'Total']],
-            body: budget.items.map(item => [item.description, item.quantity, formatGuarani(item.price), formatGuarani(item.quantity * item.price)]),
-        });
-        return doc.output('datauristring').split(',')[1];
-    };
 
     const handleSend = async () => {
         if (!recipientEmail) {
@@ -1858,12 +1970,14 @@ const EmailBudgetModal: React.FC<{
             return;
         }
         setIsSending(true);
-        const pdfBase64 = await generatePdfBase64();
+        const client = clients.find(c => c.id === budget.client_id);
+        const doc = await generateBudgetPDF(budget, currentUser, client);
+        const pdfBase64 = doc.output('datauristring').split(',')[1];
         
         const { error } = await supabase.functions.invoke('send-budget-email', {
             body: {
                 recipientEmail,
-                clientName: budget.client?.name,
+                clientName: client?.name,
                 companyName: currentUser.company_name,
                 pdfBase64,
                 budgetTitle: budget.title,
