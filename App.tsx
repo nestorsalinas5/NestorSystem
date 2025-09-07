@@ -629,9 +629,28 @@ const App: React.FC = () => {
             }
             return null;
         }
+        
+        let profileData = data as any;
+        const expiryDate = new Date(profileData.active_until);
+        const today = new Date();
+
+        // BUG FIX: Auto-deactivate user if license has expired
+        if (expiryDate < today && profileData.status === 'active') {
+            const { error: updateError } = await supabase
+                .from('profiles')
+                .update({ status: 'inactive' })
+                .eq('id', userId);
+            
+            if (updateError) {
+                console.error("Error auto-updating user status to inactive:", updateError);
+            } else {
+                // Update the local data immediately to reflect the change
+                profileData.status = 'inactive';
+            }
+        }
+        
         const { data: { user } } = await supabase.auth.getUser();
         
-        const profileData = data as any;
         return { 
             ...profileData, 
             activeUntil: profileData.active_until,
