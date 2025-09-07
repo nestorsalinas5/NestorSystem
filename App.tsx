@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats } from './types';
-import { getDashboardInsights } from './services/geminiService';
+import { getDashboardInsights, getInquiryReplySuggestion, getFollowUpEmailSuggestion, getBudgetItemsSuggestion } from './services/geminiService';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, PdfIcon, EditIcon, EmailIcon, InquiryIcon, ActivityLogIcon } from './components/Icons.tsx';
+import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, PdfIcon, EditIcon, EmailIcon, InquiryIcon, ActivityLogIcon, SparklesIcon } from './components/Icons.tsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { createClient, AuthSession } from '@supabase/supabase-js';
@@ -30,7 +30,7 @@ const formatGuarani = (amount: number) =>
 
 const logActivity = async (action: string, details?: object) => {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return; // Don't log if user is not available
+    if (!user) return; 
 
     try {
         const { error } = await supabase.from('activity_logs').insert({
@@ -41,8 +41,6 @@ const logActivity = async (action: string, details?: object) => {
         });
 
         if (error) {
-            // This will fail if the RLS policy is not set up correctly.
-            // We log it but don't show an alert to the user to not interrupt their flow.
             console.error('Error logging activity:', error.message);
         }
     } catch (e) {
@@ -107,6 +105,37 @@ const AlertModal: React.FC<{ alertState: AlertState; onClose: () => void; }> = (
                 >
                     Aceptar
                 </button>
+            </div>
+        </div>
+    );
+};
+
+const AiSuggestionModal: React.FC<{
+    title: string;
+    suggestion: string;
+    isLoading: boolean;
+    onClose: () => void;
+}> = ({ title, suggestion, isLoading, onClose }) => {
+    const copyToClipboard = () => {
+        navigator.clipboard.writeText(suggestion);
+        alert('Copiado al portapapeles!');
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4">
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-lg relative">
+                <h3 className="text-xl font-semibold mb-4">{title}</h3>
+                <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
+                    <CloseIcon />
+                </button>
+                <div className="bg-gray-100 dark:bg-gray-700 p-4 rounded-md min-h-[150px] whitespace-pre-wrap">
+                    {isLoading ? "Generando sugerencia..." : suggestion}
+                </div>
+                {!isLoading && (
+                    <div className="mt-4 flex justify-end">
+                        <button onClick={copyToClipboard} className="px-4 py-2 rounded bg-primary-600 text-white">Copiar Texto</button>
+                    </div>
+                )}
             </div>
         </div>
     );
@@ -610,6 +639,9 @@ const App: React.FC = () => {
     // State for budget modal to enable cross-component actions
     const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
     const [selectedBudget, setSelectedBudget] = useState<Budget | null>(null);
+
+    // AI State
+    const [aiSuggestion, setAiSuggestion] = useState<{ title: string; suggestion: string; isLoading: boolean } | null>(null);
     
     // --- ROUTING ---
     const getPathFromHash = () => window.location.hash.substring(1); 
@@ -1109,6 +1141,21 @@ const App: React.FC = () => {
         setCurrentPage('budgets');
     };
 
+    // --- AI HANDLERS ---
+    const handleGetInquirySuggestion = async (inquiry: Inquiry) => {
+        setAiSuggestion({ title: 'Sugerencia de Respuesta', suggestion: '', isLoading: true });
+        const suggestion = await getInquiryReplySuggestion(inquiry.message || 'El cliente no dejó un mensaje detallado.');
+        setAiSuggestion(prev => ({ ...prev!, suggestion, isLoading: false }));
+    };
+
+    const handleGetFollowUpSuggestion = async (budget: Budget) => {
+        setAiSuggestion({ title: 'Sugerencia de Seguimiento', suggestion: '', isLoading: true });
+        const clientName = clients.find(c => c.id === budget.client_id)?.name || 'Cliente';
+        const suggestion = await getFollowUpEmailSuggestion(clientName, budget.title);
+        setAiSuggestion(prev => ({ ...prev!, suggestion, isLoading: false }));
+    };
+
+
     if (loading) {
         return <div className="h-screen w-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200">Cargando...</div>;
     }
@@ -1177,6 +1224,8 @@ const App: React.FC = () => {
                             adminStats={adminStats}
                             activityLogs={activityLogs}
                             fetchAdminData={fetchAdminData}
+                            handleGetInquirySuggestion={handleGetInquirySuggestion}
+                            handleGetFollowUpSuggestion={handleGetFollowUpSuggestion}
                         />
                     </main>
                     {isAnnouncementModalOpen && activeAnnouncement && (
@@ -1190,6 +1239,7 @@ const App: React.FC = () => {
                 <AuthScreen showAlert={showAlert} />
             )}
             <AlertModal alertState={alertState} onClose={() => setAlertState({ ...alertState, isOpen: false })} />
+            {aiSuggestion && <AiSuggestionModal {...aiSuggestion} onClose={() => setAiSuggestion(null)} />}
         </>
     );
 };
@@ -1228,6 +1278,8 @@ const PageContent: React.FC<{
     adminStats: AdminDashboardStats | null;
     activityLogs: ActivityLog[];
     fetchAdminData: () => Promise<void>;
+    handleGetInquirySuggestion: (inquiry: Inquiry) => void;
+    handleGetFollowUpSuggestion: (budget: Budget) => void;
 }> = (props) => {
     switch (props.currentPage) {
         case 'dashboard':
@@ -1240,6 +1292,7 @@ const PageContent: React.FC<{
                         convertInquiryToBudget={props.convertInquiryToBudget}
                         fetchInquiries={() => props.fetchInquiries(props.currentUser.id)}
                         currentUser={props.currentUser}
+                        onGetSuggestion={props.handleGetInquirySuggestion}
                     />;
         case 'budgets':
             return <BudgetsPage 
@@ -1253,6 +1306,7 @@ const PageContent: React.FC<{
                         setIsModalOpen={props.setIsBudgetModalOpen}
                         selectedBudget={props.selectedBudget}
                         setSelectedBudget={props.setSelectedBudget}
+                        onGetSuggestion={props.handleGetFollowUpSuggestion}
                     />;
         case 'events':
             return <EventsPage events={props.events} clients={props.clients} saveEvent={props.saveEvent} deleteEvent={props.deleteEvent} />;
@@ -1349,7 +1403,10 @@ const ActivityLogPage: React.FC<{logs: ActivityLog[]}> = ({ logs }) => {
 
 
 const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
-    const { totalIncome, totalExpenses, netProfit, monthlyData, topClients } = useMemo(() => {
+    const [insights, setInsights] = useState<string>("Generando percepciones...");
+    const [loadingInsights, setLoadingInsights] = useState(true);
+
+    const { totalIncome, totalExpenses, netProfit, eventCount, monthlyData, topClients } = useMemo(() => {
         const currentMonth = new Date().getMonth();
         const currentYear = new Date().getFullYear();
         
@@ -1361,8 +1418,8 @@ const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
         const totalIncome = currentMonthEvents.reduce((acc, e) => acc + e.amount_charged, 0);
         const totalExpenses = currentMonthEvents.reduce((acc, e) => acc + e.expenses.reduce((expAcc, exp) => expAcc + exp.amount, 0), 0);
         const netProfit = totalIncome - totalExpenses;
+        const eventCount = currentMonthEvents.length;
         
-        // Monthly trend data (last 12 months)
         const monthlyData = Array.from({ length: 12 }).map((_, i) => {
             const date = new Date();
             date.setMonth(date.getMonth() - i);
@@ -1380,7 +1437,6 @@ const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
             return { name: monthName, Ingresos: income };
         }).reverse();
 
-        // Top clients data
         const clientCounts: {[key: string]: number} = {};
         events.forEach(event => {
             if (event.client) {
@@ -1392,9 +1448,27 @@ const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
             .slice(0, 5)
             .map(([name, count]) => ({ name, Eventos: count }));
 
-        return { totalIncome, totalExpenses, netProfit, monthlyData, topClients };
+        return { totalIncome, totalExpenses, netProfit, eventCount, monthlyData, topClients };
     }, [events]);
     
+    useEffect(() => {
+        const fetchInsights = async () => {
+            if (eventCount > 0) {
+                setLoadingInsights(true);
+                try {
+                    const result = await getDashboardInsights(totalIncome, totalExpenses, netProfit, eventCount);
+                    setInsights(result);
+                } finally {
+                    setLoadingInsights(false);
+                }
+            } else {
+                setInsights("No hay datos de eventos este mes para generar percepciones.");
+                setLoadingInsights(false);
+            }
+        };
+        fetchInsights();
+    }, [totalIncome, totalExpenses, netProfit, eventCount]);
+
     const formatYAxis = (tickItem: number): string => {
         if (tickItem >= 1000000) return `${(tickItem / 1000000).toFixed(1)}M`;
         if (tickItem >= 1000) return `${Math.round(tickItem / 1000)}k`;
@@ -1403,18 +1477,28 @@ const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
 
     return (
         <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                 <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                 <div className="lg:col-span-1 md:col-span-3 bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
                     <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300">Ingresos Totales (Mes)</h4>
                     <p className="text-3xl font-bold text-green-500 mt-2">{formatGuarani(totalIncome)}</p>
                 </div>
-                 <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
+                 <div className="lg:col-span-1 md:col-span-3 bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
                     <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300">Gastos Totales (Mes)</h4>
                     <p className="text-3xl font-bold text-red-500 mt-2">{formatGuarani(totalExpenses)}</p>
                 </div>
-                 <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
+                 <div className="lg:col-span-1 md:col-span-3 bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
                     <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300">Ganancia Neta (Mes)</h4>
                     <p className="text-3xl font-bold text-blue-500 mt-2">{formatGuarani(netProfit)}</p>
+                </div>
+                <div className="lg:col-span-1 md:col-span-3 bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                    <div className="flex items-center mb-2">
+                        <SparklesIcon />
+                        <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300 ml-2">Análisis con IA</h4>
+                    </div>
+                    {loadingInsights ? 
+                        <p className="text-sm text-gray-500 italic">Generando percepciones...</p> : 
+                        <p className="text-sm text-gray-700 dark:text-gray-300">{insights}</p>
+                    }
                 </div>
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1436,7 +1520,7 @@ const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
                     <ResponsiveContainer width="100%" height={300}>
                         <BarChart data={topClients} layout="vertical">
                             <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(128, 128, 128, 0.3)" />
-                            <XAxis type="number" />
+                            <XAxis type="number" allowDecimals={false} />
                             <YAxis type="category" dataKey="name" width={100} />
                             <Tooltip formatter={(value) => `${value} eventos`} />
                             <Legend />
@@ -2056,7 +2140,8 @@ const BudgetsPage: React.FC<{
     setIsModalOpen: (isOpen: boolean) => void;
     selectedBudget: Budget | null;
     setSelectedBudget: (budget: Budget | null) => void;
-}> = ({ budgets, clients, currentUser, saveBudget, deleteBudget, showAlert, isModalOpen, setIsModalOpen, selectedBudget, setSelectedBudget }) => {
+    onGetSuggestion: (budget: Budget) => void;
+}> = ({ budgets, clients, currentUser, saveBudget, deleteBudget, showAlert, isModalOpen, setIsModalOpen, selectedBudget, setSelectedBudget, onGetSuggestion }) => {
 
     const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
     const [budgetToSend, setBudgetToSend] = useState<Budget | null>(null);
@@ -2128,6 +2213,11 @@ const BudgetsPage: React.FC<{
                                         <button title="Eliminar" onClick={() => deleteBudget(budget.id)} className="p-1.5 rounded text-red-600 hover:bg-red-100 dark:hover:bg-red-900/50">
                                             <TrashIcon />
                                         </button>
+                                        {budget.status === 'Enviado' && (
+                                            <button title="Sugerencia de Seguimiento IA" onClick={() => onGetSuggestion(budget)} className="p-1.5 rounded text-yellow-500 hover:bg-yellow-100 dark:hover:bg-yellow-900/50">
+                                                <SparklesIcon />
+                                            </button>
+                                        )}
                                     </div>
                                 </td>
                             </tr>
@@ -2157,6 +2247,9 @@ const BudgetFormModal: React.FC<{
     }, [budget, clients]);
 
     const [formData, setFormData] = useState<Budget>(initialBudget);
+    const [aiDescription, setAiDescription] = useState('');
+    const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
+    const [isAiLoading, setIsAiLoading] = useState(false);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
         const { name, value } = e.target;
@@ -2174,8 +2267,8 @@ const BudgetFormModal: React.FC<{
         setFormData(prev => ({...prev, items: newItems}));
     };
 
-    const addItem = () => {
-        setFormData(prev => ({...prev, items: [...prev.items, { id: Math.random().toString(), description: '', quantity: 1, price: 0 }]}));
+    const addItem = (description?: string) => {
+        setFormData(prev => ({...prev, items: [...prev.items, { id: Math.random().toString(), description: description || '', quantity: 1, price: 0 }]}));
     };
     
     const removeItem = (index: number) => {
@@ -2197,6 +2290,14 @@ const BudgetFormModal: React.FC<{
         onSave(formData);
     };
 
+    const handleGetItemSuggestions = async () => {
+        if (!aiDescription) return;
+        setIsAiLoading(true);
+        const suggestionsString = await getBudgetItemsSuggestion(aiDescription);
+        setAiSuggestions(suggestionsString.split(',').map(s => s.trim()));
+        setIsAiLoading(false);
+    };
+
     return (
          <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -2214,6 +2315,33 @@ const BudgetFormModal: React.FC<{
                              <option>Borrador</option><option>Enviado</option><option>Aceptado</option><option>Rechazado</option>
                          </select>
                      </div>
+                     
+                     {/* AI Assistant for Items */}
+                    <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+                        <label className="font-semibold flex items-center"><SparklesIcon /> <span className="ml-2">Asistente de Items con IA</span></label>
+                        <textarea
+                            value={aiDescription}
+                            onChange={(e) => setAiDescription(e.target.value)}
+                            placeholder="Describe el evento (ej: Boda para 150 personas en una quinta al aire libre)"
+                            className="w-full p-2 mt-2 border rounded dark:bg-gray-700 dark:border-gray-600"
+                            rows={2}
+                        />
+                        <button type="button" onClick={handleGetItemSuggestions} disabled={isAiLoading} className="mt-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded disabled:bg-blue-300">
+                            {isAiLoading ? 'Pensando...' : 'Sugerir Items'}
+                        </button>
+                        {aiSuggestions.length > 0 && (
+                            <div className="mt-3">
+                                <p className="text-sm font-medium">Sugerencias:</p>
+                                <div className="flex flex-wrap gap-2 mt-1">
+                                    {aiSuggestions.map((s, i) => (
+                                        <button key={i} type="button" onClick={() => addItem(s)} className="text-sm bg-blue-100 dark:bg-blue-800 px-2 py-1 rounded-full hover:bg-blue-200">
+                                            + {s}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
 
                      {/* Items table */}
                      <div className="border-y dark:border-gray-700 py-4">
@@ -2226,7 +2354,7 @@ const BudgetFormModal: React.FC<{
                                  <button type="button" onClick={() => removeItem(index)} className="col-span-1 p-2 text-red-500"><TrashIcon /></button>
                              </div>
                         ))}
-                         <button type="button" onClick={addItem} className="flex items-center text-primary-600 mt-2"><PlusIcon /> <span className="ml-1">Añadir Item</span></button>
+                         <button type="button" onClick={() => addItem()} className="flex items-center text-primary-600 mt-2"><PlusIcon /> <span className="ml-1">Añadir Item</span></button>
                      </div>
                      
                      {/* Summary */}
@@ -2323,7 +2451,8 @@ const InquiriesPage: React.FC<{
     fetchInquiries: () => Promise<void>;
     convertInquiryToBudget: (inquiry: Inquiry) => Promise<void>;
     currentUser: User;
-}> = ({ inquiries, fetchInquiries, convertInquiryToBudget, currentUser }) => {
+    onGetSuggestion: (inquiry: Inquiry) => void;
+}> = ({ inquiries, fetchInquiries, convertInquiryToBudget, currentUser, onGetSuggestion }) => {
     
     const publicLink = `${window.location.origin}${window.location.pathname}#/inquiry/${currentUser.id}`;
     const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(publicLink)}`;
@@ -2333,6 +2462,7 @@ const InquiriesPage: React.FC<{
         if (error) {
             alert("Error al actualizar estado: " + error.message);
         } else {
+            await logActivity('inquiry_status_updated', { inquiryId, newStatus: status });
             await fetchInquiries();
         }
     };
@@ -2381,12 +2511,15 @@ const InquiriesPage: React.FC<{
                                             <option>Presupuesto Enviado</option>
                                         </select>
                                     </td>
-                                    <td className="p-2">
+                                    <td className="p-2 flex items-center space-x-2">
                                         <button 
                                             onClick={() => convertInquiryToBudget(inquiry)} 
                                             className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 text-sm font-semibold"
                                         >
                                             Convertir a Presupuesto
+                                        </button>
+                                        <button title="Sugerencia de Respuesta IA" onClick={() => onGetSuggestion(inquiry)} className="p-1.5 rounded text-yellow-500 hover:bg-yellow-100 dark:hover:bg-yellow-900/50">
+                                            <SparklesIcon />
                                         </button>
                                     </td>
                                 </tr>
