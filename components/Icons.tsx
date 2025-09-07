@@ -211,3 +211,11 @@ export const EmailIcon = () => (
         <polyline points="22,6 12,13 2,6"></polyline>
     </svg>
 );
+
+export const SparklesIcon = () => (
+    <svg {...iconProps} className="w-5 h-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M12 3L14.34 8.66L20 11L14.34 13.34L12 19L9.66 13.34L4 11L9.66 8.66L12 3Z" />
+      <path d="M5 3L6.07 5.93L9 7L6.07 8.07L5 11L3.93 8.07L1 7L3.93 5.93L5 3Z" />
+      <path d="M19 13L17.93 15.93L15 17L17.93 18.07L19 21L20.07 18.07L23 17L20.07 15.93L19 13Z" />
+    </svg>
+);
