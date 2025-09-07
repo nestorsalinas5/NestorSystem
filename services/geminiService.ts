@@ -1,14 +1,20 @@
 
 import { GoogleGenAI } from "@google/genai";
 
-if (!process.env.API_KEY) {
-  console.warn("API_KEY environment variable not set. Gemini features will be disabled.");
+// Vite expone las variables de entorno en el objeto import.meta.env.
+// El nombre DEBE empezar con VITE_ para que sea accesible desde el frontend.
+const apiKey = import.meta.env?.VITE_API_KEY;
+
+if (!apiKey) {
+  console.warn("La variable de entorno VITE_API_KEY no está configurada. Las funciones de Gemini estarán deshabilitadas.");
 }
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+// Inicializa el cliente solo si la clave existe.
+const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 const generateContentWithGuard = async (prompt: string): Promise<string> => {
-    if (!process.env.API_KEY) {
+    // Verifica si el cliente de IA fue inicializado.
+    if (!ai) {
         return "API Key no configurada. Las funciones de IA están deshabilitadas.";
     }
     try {
@@ -20,7 +26,8 @@ const generateContentWithGuard = async (prompt: string): Promise<string> => {
         return response.text;
     } catch (error) {
         console.error("Error fetching from Gemini:", error);
-        return "No se pudo conectar con el asistente de IA en este momento.";
+        // Proporciona un mensaje de error más amigable para el usuario.
+        return "No se pudo conectar con el asistente de IA en este momento. Verifica la configuración de la API Key en Vercel.";
     }
 };
 
