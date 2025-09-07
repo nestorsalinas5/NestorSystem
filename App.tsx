@@ -741,17 +741,16 @@ const App: React.FC = () => {
         const { data: stats, error: statsError } = await supabase.rpc('get_admin_dashboard_stats');
         if (statsError) {
             showAlert(`Error al cargar estadísticas del dashboard: ${statsError.message}`, 'error');
-        } else {
-            setAdminStats(stats as AdminDashboardStats);
+            return;
         }
-
-        const { data: usersData, error: usersError } = await supabase.functions.invoke('get-all-users');
+        setAdminStats(stats as AdminDashboardStats);
+       
+        const { data: usersData, error: usersError } = await supabase.rpc('get_all_users_with_details');
         if (usersError) {
             showAlert(`Error al cargar la lista de usuarios: ${usersError.message}`, 'error');
-        } else {
-            const mappedUsers = (usersData as any[]).map(user => ({...user, activeUntil: user.active_until }));
-            setUsers(mappedUsers as User[]);
+            return;
         }
+        setUsers(usersData as User[]);
 
         const { data: announcementsData, error: announcementsError } = await supabase.from('announcements').select('*').order('created_at', { ascending: false });
         if(announcementsError) showAlert('Error al cargar anuncios: ' + announcementsError.message, 'error');
