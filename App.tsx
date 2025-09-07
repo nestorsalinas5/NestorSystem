@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry } from './types';
+import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats } from './types';
 import { getDashboardInsights } from './services/geminiService';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, PdfIcon, EditIcon, EmailIcon, InquiryIcon } from './components/Icons.tsx';
+import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, PdfIcon, EditIcon, EmailIcon, InquiryIcon, ActivityLogIcon } from './components/Icons.tsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { createClient, AuthSession } from '@supabase/supabase-js';
@@ -26,6 +26,16 @@ type AlertState = {
 // --- HELPERS ---
 const formatGuarani = (amount: number) =>
     new Intl.NumberFormat('es-PY', { style: 'currency', currency: 'PYG', minimumFractionDigits: 0 }).format(amount);
+
+const logActivity = async (action: string, details?: object) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return; // Don't log if not authenticated
+    
+    await supabase.functions.invoke('log-activity', {
+        body: { action, details },
+    });
+};
+
 
 // --- AUTH SCREEN COMPONENT ---
 const AuthScreen: React.FC<{ showAlert: (message: string, type: 'success' | 'error') => void; }> = ({ showAlert }) => {
@@ -104,7 +114,8 @@ const Sidebar: React.FC<{
             items.push(
                 { page: 'userManagement', label: 'Usuarios', icon: <UserManagementIcon /> },
                 { page: 'announcements', label: 'Anuncios', icon: <AnnouncementIcon /> },
-                { page: 'sendNotification', label: 'Enviar Notificación', icon: <SendIcon /> }
+                { page: 'sendNotification', label: 'Enviar Notificación', icon: <SendIcon /> },
+                { page: 'activityLog', label: 'Registro de Actividad', icon: <ActivityLogIcon /> }
             );
         } else {
              items.push(
@@ -568,6 +579,8 @@ const App: React.FC = () => {
     const [announcements, setAnnouncements] = useState<Announcement[]>([]);
     const [activeAnnouncement, setActiveAnnouncement] = useState<Announcement | null>(null);
     const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
+    const [adminStats, setAdminStats] = useState<AdminDashboardStats | null>(null);
+    const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
 
     // Notifications
     const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -690,6 +703,17 @@ const App: React.FC = () => {
         const { data: announcementsData, error: announcementsError } = await supabase.from('announcements').select('*').order('created_at', { ascending: false });
         if(announcementsError) showAlert('Error al cargar anuncios: ' + announcementsError.message, 'error');
         else setAnnouncements(announcementsData as Announcement[] || []);
+        
+        // Admin Dashboard Stats
+        const { data: statsData, error: statsError } = await supabase.functions.invoke('get-admin-dashboard-stats');
+        if(statsError) showAlert('Error al cargar estadísticas del dashboard: ' + statsError.message, 'error');
+        else setAdminStats(statsData as AdminDashboardStats);
+        
+        // Activity Logs
+        const { data: logsData, error: logsError } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(100);
+        if(logsError) showAlert('Error al cargar registro de actividad: ' + logsError.message, 'error');
+        else setActivityLogs(logsData as ActivityLog[]);
+        
     }, []);
 
     const fetchClients = useCallback(async (userId: string) => {
@@ -783,6 +807,7 @@ const App: React.FC = () => {
             showAlert('Error al guardar el evento: ' + error.message, 'error');
         } else {
             showAlert('Evento guardado exitosamente.', 'success');
+             await logActivity('event_created', { eventName: event.name });
             if (isNew) {
                 const eventClient = clients.find(c => c.id === event.client_id);
                 if (eventClient && eventClient.email) {
@@ -808,6 +833,7 @@ const App: React.FC = () => {
             if (error) showAlert('Error al eliminar el evento: ' + error.message, 'error');
             else {
                 showAlert('Evento eliminado.', 'success');
+                await logActivity('event_deleted');
                 await fetchUserData(currentUser!.id);
             }
         }
@@ -834,6 +860,7 @@ const App: React.FC = () => {
             return null;
         } else {
             showAlert('Cliente guardado exitosamente.', 'success');
+             await logActivity(isNew ? 'client_created' : 'client_updated', { clientName: client.name });
             if (isNew && client.email) {
                  await supabase.functions.invoke('send-welcome-email', {
                     body: { email: client.email, name: client.name, djCompanyName: currentUser!.company_name },
@@ -850,6 +877,7 @@ const App: React.FC = () => {
             if (error) showAlert('Error al eliminar el cliente: ' + error.message, 'error');
             else {
                 showAlert('Cliente eliminado.', 'success');
+                 await logActivity('client_deleted');
                 await fetchClients(currentUser!.id);
             }
         }
@@ -870,6 +898,7 @@ const App: React.FC = () => {
             if (error) showAlert("Error al crear usuario: " + error.message, 'error');
             else {
                 showAlert("Usuario creado exitosamente.", 'success');
+                await logActivity('admin_user_created', { userEmail: user.email });
                 await fetchAdminData();
             }
         } else {
@@ -880,6 +909,7 @@ const App: React.FC = () => {
                 await fetchAdminData();
                 if (currentUser?.id === user.id) setCurrentUser(await fetchUserProfile(user.id));
                 showAlert("Perfil actualizado exitosamente.", 'success');
+                await logActivity('admin_user_updated', { userEmail: user.email });
             }
         }
     };
@@ -918,6 +948,7 @@ const App: React.FC = () => {
         if(error) showAlert('Error guardando anuncio: ' + error.message, 'error');
         else {
             showAlert('Anuncio guardado exitosamente.', 'success');
+            await logActivity('admin_announcement_saved', { title: announcement.title });
             await fetchAdminData();
         }
     };
@@ -928,6 +959,7 @@ const App: React.FC = () => {
             if(error) showAlert('Error eliminando anuncio: ' + error.message, 'error');
             else {
                 showAlert('Anuncio eliminado.', 'success');
+                await logActivity('admin_announcement_deleted');
                 await fetchAdminData();
             }
         }
@@ -954,7 +986,10 @@ const App: React.FC = () => {
         }
         const { error } = await supabase.functions.invoke('send-notification', { body: { message } });
         if(error) showAlert('Error al enviar notificación: ' + error.message, 'error');
-        else showAlert('Notificación enviada a todos los usuarios.', 'success');
+        else {
+            showAlert('Notificación enviada a todos los usuarios.', 'success');
+            await logActivity('admin_mass_notification_sent');
+        }
     };
 
     const markNotificationsAsRead = async () => {
@@ -1002,6 +1037,7 @@ const App: React.FC = () => {
             showAlert('Error al guardar el presupuesto: ' + error.message, 'error');
         } else {
             showAlert('Presupuesto guardado exitosamente.', 'success');
+            await logActivity(isNew ? 'budget_created' : 'budget_updated', { title: budget.title });
             await fetchBudgets(currentUser!.id);
         }
     };
@@ -1012,6 +1048,7 @@ const App: React.FC = () => {
             if (error) showAlert('Error al eliminar el presupuesto: ' + error.message, 'error');
             else {
                 showAlert('Presupuesto eliminado.', 'success');
+                 await logActivity('budget_deleted');
                 await fetchBudgets(currentUser!.id);
             }
         }
@@ -1117,6 +1154,9 @@ const App: React.FC = () => {
                             setIsBudgetModalOpen={setIsBudgetModalOpen}
                             selectedBudget={selectedBudget}
                             setSelectedBudget={setSelectedBudget}
+                            adminStats={adminStats}
+                            activityLogs={activityLogs}
+                            fetchAdminData={fetchAdminData}
                         />
                     </main>
                     {isAnnouncementModalOpen && activeAnnouncement && (
@@ -1165,11 +1205,14 @@ const PageContent: React.FC<{
     setIsBudgetModalOpen: (isOpen: boolean) => void;
     selectedBudget: Budget | null;
     setSelectedBudget: (budget: Budget | null) => void;
+    adminStats: AdminDashboardStats | null;
+    activityLogs: ActivityLog[];
+    fetchAdminData: () => Promise<void>;
 }> = (props) => {
     switch (props.currentPage) {
         case 'dashboard':
             return props.currentUser.role === 'admin' 
-                ? <DashboardAdmin users={props.users} /> 
+                ? <DashboardAdmin stats={props.adminStats} /> 
                 : <DashboardUser events={props.events} />;
         case 'inquiries':
             return <InquiriesPage 
@@ -1207,40 +1250,84 @@ const PageContent: React.FC<{
             return <AnnouncementsPage announcements={props.announcements} saveAnnouncement={props.saveAnnouncement} deleteAnnouncement={props.deleteAnnouncement} toggleAnnouncementActive={props.toggleAnnouncementActive} />;
         case 'sendNotification':
             return <SendNotificationPage sendNotificationToAll={props.sendNotificationToAll} />;
+        case 'activityLog':
+            return <ActivityLogPage logs={props.activityLogs} />;
         default:
             return <div>Página no encontrada o en construcción.</div>;
     }
 };
 
-const DashboardAdmin: React.FC<{users: User[]}> = ({users}) => {
-    const activeUsers = users.filter(u => u.status === 'active').length;
-    const inactiveUsers = users.filter(u => u.status === 'inactive').length;
-    const data = [
-        { name: 'Activos', value: activeUsers, fill: '#3b82f6' },
-        { name: 'Inactivos', value: inactiveUsers, fill: '#ef4444' }
-    ];
+const DashboardAdmin: React.FC<{stats: AdminDashboardStats | null}> = ({stats}) => {
+    if (!stats) {
+        return <div className="text-center p-10">Cargando estadísticas...</div>
+    }
 
+    const { newUsersLast30Days, licensesExpiringSoon, totalEvents, growthChartData } = stats;
+    
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-                <h3 className="text-xl font-semibold mb-4">Resumen de Usuarios</h3>
-                 <ResponsiveContainer width="100%" height={300}>
-                    <PieChart>
-                        <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
-                             {data.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.fill} />)}
-                        </Pie>
-                        <Tooltip formatter={(value) => `${value} usuarios`} />
-                        <Legend />
-                    </PieChart>
-                </ResponsiveContainer>
+        <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                 <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
+                    <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300">Nuevos Usuarios (30d)</h4>
+                    <p className="text-4xl font-bold text-green-500 mt-2">{newUsersLast30Days}</p>
+                </div>
+                 <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
+                    <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300">Licencias por Vencer (30d)</h4>
+                    <p className="text-4xl font-bold text-yellow-500 mt-2">{licensesExpiringSoon}</p>
+                </div>
+                 <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
+                    <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300">Total de Eventos (Plataforma)</h4>
+                    <p className="text-4xl font-bold text-blue-500 mt-2">{totalEvents}</p>
+                </div>
             </div>
-             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow flex flex-col justify-center items-center">
-                <h3 className="text-xl font-semibold mb-4">Total de Usuarios</h3>
-                <p className="text-6xl font-bold text-primary-600">{users.length}</p>
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                <h3 className="text-xl font-semibold mb-4">Crecimiento de Usuarios Registrados</h3>
+                <ResponsiveContainer width="100%" height={300}>
+                    <LineChart data={growthChartData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(128, 128, 128, 0.3)" />
+                        <XAxis dataKey="name" tickFormatter={(dateStr) => new Date(dateStr).toLocaleDateString('es-ES', { month: 'short', day: 'numeric'})} />
+                        <YAxis allowDecimals={false} />
+                        <Tooltip labelFormatter={(label) => new Date(label).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })} />
+                        <Legend />
+                        <Line type="monotone" dataKey="Usuarios" stroke="#3b82f6" strokeWidth={2} name="Total de Usuarios" />
+                    </LineChart>
+                </ResponsiveContainer>
             </div>
         </div>
     );
 };
+
+const ActivityLogPage: React.FC<{logs: ActivityLog[]}> = ({ logs }) => {
+    return (
+         <div className="bg-white dark:bg-gray-800 p-4 md:p-6 rounded-lg shadow">
+            <h3 className="text-xl font-semibold mb-4">Registro de Actividad del Sistema</h3>
+            <div className="overflow-x-auto max-h-[70vh]">
+                 <table className="w-full text-left text-sm">
+                    <thead className="sticky top-0 bg-gray-100 dark:bg-gray-700">
+                        <tr className="border-b dark:border-gray-600">
+                            <th className="p-2">Fecha</th>
+                            <th className="p-2">Usuario</th>
+                            <th className="p-2">Acción</th>
+                            <th className="p-2">Detalles</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {logs.map(log => (
+                            <tr key={log.id} className="border-b dark:border-gray-600">
+                                <td className="p-2 whitespace-nowrap">{new Date(log.created_at).toLocaleString('es-ES')}</td>
+                                <td className="p-2">{log.user_email}</td>
+                                <td className="p-2">{log.action.replace(/_/g, ' ')}</td>
+                                <td className="p-2 font-mono text-xs">{log.details ? JSON.stringify(log.details) : 'N/A'}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};
+
+
 const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
     const { totalIncome, totalExpenses, netProfit, monthlyData, topClients } = useMemo(() => {
         const currentMonth = new Date().getMonth();
@@ -2179,6 +2266,7 @@ const EmailBudgetModal: React.FC<{
             showAlert("Error al enviar el correo: " + error.message, 'error');
         } else {
             showAlert("Presupuesto enviado exitosamente.", 'success');
+             await logActivity('budget_sent', { title: budget.title, clientName: client?.name });
             onClose();
         }
         setIsSending(false);
