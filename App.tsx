@@ -489,7 +489,7 @@ const getBase64ImageFromUrl = (url: string): Promise<string | null> => {
         };
         img.onerror = () => resolve(null);
         img.src = url;
-    });
+    };
 };
 
 const generateBudgetPDF = async (budget: Budget, currentUser: User, client: Client | undefined) => {
@@ -1475,26 +1475,36 @@ const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
     };
 
     return (
-         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
-                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
-                        <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300">Ingresos Totales (Mes)</h4>
-                        <p className="text-3xl font-bold text-green-500 mt-2">{formatGuarani(totalIncome)}</p>
-                    </div>
-                    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
-                        <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300">Gastos Totales (Mes)</h4>
-                        <p className="text-3xl font-bold text-red-500 mt-2">{formatGuarani(totalExpenses)}</p>
-                    </div>
-                    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
-                        <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300">Ganancia Neta (Mes)</h4>
-                        <p className="text-3xl font-bold text-blue-500 mt-2">{formatGuarani(netProfit)}</p>
-                    </div>
+        <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
+                    <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-300">Ingresos Totales (Mes)</h4>
+                    <p className="text-3xl font-bold text-green-500 mt-2">{formatGuarani(totalIncome)}</p>
                 </div>
+                <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
+                    <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-300">Gastos Totales (Mes)</h4>
+                    <p className="text-3xl font-bold text-red-500 mt-2">{formatGuarani(totalExpenses)}</p>
+                </div>
+                <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
+                    <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-300">Ganancia Neta (Mes)</h4>
+                    <p className="text-3xl font-bold text-blue-500 mt-2">{formatGuarani(netProfit)}</p>
+                </div>
+                <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                    <div className="flex items-center mb-2">
+                        <SparklesIcon />
+                        <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-300 ml-2">Análisis con IA</h4>
+                    </div>
+                    {loadingInsights ? 
+                        <p className="text-xs text-gray-500 italic">Generando percepciones...</p> : 
+                        <p className="text-xs text-gray-700 dark:text-gray-300">{insights}</p>
+                    }
+                </div>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
                     <h3 className="text-xl font-semibold mb-4">Tendencia de Ingresos (Últimos 12 meses)</h3>
                     <ResponsiveContainer width="100%" height={300}>
-                        <LineChart data={monthlyData}>
+                        <LineChart data={monthlyData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(128, 128, 128, 0.3)" />
                             <XAxis dataKey="name" />
                             <YAxis tickFormatter={formatYAxis} />
@@ -1504,25 +1514,13 @@ const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
                         </LineChart>
                     </ResponsiveContainer>
                 </div>
-            </div>
-            <div className="lg:col-span-1 space-y-6">
                 <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-                    <div className="flex items-center mb-2">
-                        <SparklesIcon />
-                        <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300 ml-2">Análisis con IA</h4>
-                    </div>
-                    {loadingInsights ? 
-                        <p className="text-sm text-gray-500 italic">Generando percepciones...</p> : 
-                        <p className="text-sm text-gray-700 dark:text-gray-300">{insights}</p>
-                    }
-                </div>
-                 <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
                     <h3 className="text-xl font-semibold mb-4">Top 5 Clientes</h3>
                     <ResponsiveContainer width="100%" height={300}>
-                        <BarChart data={topClients} layout="vertical">
+                        <BarChart data={topClients} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(128, 128, 128, 0.3)" />
                             <XAxis type="number" allowDecimals={false} />
-                            <YAxis type="category" dataKey="name" width={100} />
+                            <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 12 }} />
                             <Tooltip formatter={(value) => `${value} eventos`} />
                             <Legend />
                             <Bar dataKey="Eventos" fill="#3b82f6" />
