@@ -57,6 +57,38 @@ export interface Notification {
   created_at: string;
 }
 
+// FIX: Added missing Inquiry type definition.
+export interface Inquiry {
+  id: string;
+  user_id: string;
+  client_name: string;
+  client_email?: string;
+  client_phone?: string;
+  event_type?: string;
+  event_date?: string;
+  message?: string;
+  status: 'Nueva' | 'Contactado' | 'Presupuesto Enviado';
+  created_at: string;
+}
+
+// FIX: Added missing ActivityLog type definition.
+export interface ActivityLog {
+    id: string;
+    created_at: string;
+    user_id: string;
+    user_email: string | null;
+    action: string;
+    details: object | null;
+}
+
+// FIX: Added missing AdminDashboardStats type definition.
+export interface AdminDashboardStats {
+    newUsersLast30Days: number;
+    licensesExpiringSoon: number;
+    totalEvents: number;
+    growthChartData: { name: string; Usuarios: number }[];
+}
+
 export interface BudgetItem {
   id: string; // temp client-side id
   description: string;
@@ -80,33 +112,5 @@ export interface Budget {
   created_at: string;
 }
 
-export interface Inquiry {
-  id: string;
-  user_id: string;
-  client_name: string;
-  client_email?: string;
-  client_phone?: string;
-  event_type?: string;
-  event_date?: string;
-  message?: string;
-  status: 'Nueva' | 'Contactado' | 'Presupuesto Enviado';
-  created_at: string;
-}
-
-export interface ActivityLog {
-    id: string;
-    user_email: string;
-    action: string;
-    details?: { [key: string]: any };
-    created_at: string;
-}
-
-export interface AdminDashboardStats {
-    newUsersLast30Days: number;
-    licensesExpiringSoon: number;
-    totalEvents: number;
-    growthChartData: { name: string; Usuarios: number }[];
-}
-
-
+// FIX: Added 'inquiries' and 'activityLog' to the Page type to resolve assignment errors.
 export type Page = 'dashboard' | 'events' | 'clients' | 'agenda' | 'reports' | 'settings' | 'userManagement' | 'announcements' | 'sendNotification' | 'budgets' | 'inquiries' | 'activityLog';
