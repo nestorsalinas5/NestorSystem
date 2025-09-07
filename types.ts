@@ -1,3 +1,4 @@
+
 export interface Client {
   id: string; // From Supabase
   user_id: string;
