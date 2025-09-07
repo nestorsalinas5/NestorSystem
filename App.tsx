@@ -1474,32 +1474,22 @@ const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
     };
 
     return (
-        <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                 <div className="lg:col-span-1 md:col-span-3 bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
-                    <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300">Ingresos Totales (Mes)</h4>
-                    <p className="text-3xl font-bold text-green-500 mt-2">{formatGuarani(totalIncome)}</p>
-                </div>
-                 <div className="lg:col-span-1 md:col-span-3 bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
-                    <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300">Gastos Totales (Mes)</h4>
-                    <p className="text-3xl font-bold text-red-500 mt-2">{formatGuarani(totalExpenses)}</p>
-                </div>
-                 <div className="lg:col-span-1 md:col-span-3 bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
-                    <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300">Ganancia Neta (Mes)</h4>
-                    <p className="text-3xl font-bold text-blue-500 mt-2">{formatGuarani(netProfit)}</p>
-                </div>
-                <div className="lg:col-span-1 md:col-span-3 bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-                    <div className="flex items-center mb-2">
-                        <SparklesIcon />
-                        <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300 ml-2">Análisis con IA</h4>
+         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-6">
+                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
+                        <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300">Ingresos Totales (Mes)</h4>
+                        <p className="text-3xl font-bold text-green-500 mt-2">{formatGuarani(totalIncome)}</p>
                     </div>
-                    {loadingInsights ? 
-                        <p className="text-sm text-gray-500 italic">Generando percepciones...</p> : 
-                        <p className="text-sm text-gray-700 dark:text-gray-300">{insights}</p>
-                    }
+                    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
+                        <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300">Gastos Totales (Mes)</h4>
+                        <p className="text-3xl font-bold text-red-500 mt-2">{formatGuarani(totalExpenses)}</p>
+                    </div>
+                    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-center">
+                        <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300">Ganancia Neta (Mes)</h4>
+                        <p className="text-3xl font-bold text-blue-500 mt-2">{formatGuarani(netProfit)}</p>
+                    </div>
                 </div>
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
                     <h3 className="text-xl font-semibold mb-4">Tendencia de Ingresos (Últimos 12 meses)</h3>
                     <ResponsiveContainer width="100%" height={300}>
@@ -1513,7 +1503,19 @@ const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
                         </LineChart>
                     </ResponsiveContainer>
                 </div>
+            </div>
+            <div className="lg:col-span-1 space-y-6">
                 <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                    <div className="flex items-center mb-2">
+                        <SparklesIcon />
+                        <h4 className="text-lg font-semibold text-gray-600 dark:text-gray-300 ml-2">Análisis con IA</h4>
+                    </div>
+                    {loadingInsights ? 
+                        <p className="text-sm text-gray-500 italic">Generando percepciones...</p> : 
+                        <p className="text-sm text-gray-700 dark:text-gray-300">{insights}</p>
+                    }
+                </div>
+                 <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
                     <h3 className="text-xl font-semibold mb-4">Top 5 Clientes</h3>
                     <ResponsiveContainer width="100%" height={300}>
                         <BarChart data={topClients} layout="vertical">
