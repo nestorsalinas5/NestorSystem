@@ -632,6 +632,7 @@ const App: React.FC = () => {
         let profileData = data as any;
         const expiryDate = new Date(profileData.active_until);
         const today = new Date();
+        today.setHours(0,0,0,0); // Compare against start of today
 
         if (expiryDate < today && profileData.status === 'active') {
             const { error: updateError } = await supabase
@@ -642,6 +643,7 @@ const App: React.FC = () => {
             if (updateError) {
                 console.error("Error auto-updating user status to inactive:", updateError);
             } else {
+                console.log(`User ${userId} automatically set to inactive.`);
                 profileData.status = 'inactive';
             }
         }
@@ -691,7 +693,13 @@ const App: React.FC = () => {
 
 
     const fetchAdminData = useCallback(async () => {
-        // Users
+        const { data: stats, error: statsError } = await supabase.rpc('get_admin_dashboard_stats');
+        if (statsError) {
+            showAlert(`Error al cargar estadísticas del dashboard: ${statsError.message}`, 'error');
+        } else {
+            setAdminStats(stats as AdminDashboardStats);
+        }
+
         const { data: usersData, error: usersError } = await supabase.functions.invoke('get-all-users');
         if (usersError) {
             showAlert(`Error al cargar la lista de usuarios: ${usersError.message}`, 'error');
@@ -699,17 +707,11 @@ const App: React.FC = () => {
             const mappedUsers = (usersData as any[]).map(user => ({...user, activeUntil: user.active_until }));
             setUsers(mappedUsers as User[]);
         }
-        // Announcements
+
         const { data: announcementsData, error: announcementsError } = await supabase.from('announcements').select('*').order('created_at', { ascending: false });
         if(announcementsError) showAlert('Error al cargar anuncios: ' + announcementsError.message, 'error');
         else setAnnouncements(announcementsData as Announcement[] || []);
         
-        // Admin Dashboard Stats
-        const { data: statsData, error: statsError } = await supabase.functions.invoke('get-admin-dashboard-stats');
-        if(statsError) showAlert('Error al cargar estadísticas del dashboard: ' + statsError.message, 'error');
-        else setAdminStats(statsData as AdminDashboardStats);
-        
-        // Activity Logs
         const { data: logsData, error: logsError } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(100);
         if(logsError) showAlert('Error al cargar registro de actividad: ' + logsError.message, 'error');
         else setActivityLogs(logsData as ActivityLog[]);
