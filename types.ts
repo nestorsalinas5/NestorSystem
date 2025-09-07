@@ -92,4 +92,20 @@ export interface Inquiry {
   created_at: string;
 }
 
-export type Page = 'dashboard' | 'events' | 'clients' | 'agenda' | 'reports' | 'settings' | 'userManagement' | 'announcements' | 'sendNotification' | 'budgets' | 'inquiries';
+export interface ActivityLog {
+    id: string;
+    user_email: string;
+    action: string;
+    details?: { [key: string]: any };
+    created_at: string;
+}
+
+export interface AdminDashboardStats {
+    newUsersLast30Days: number;
+    licensesExpiringSoon: number;
+    totalEvents: number;
+    growthChartData: { name: string; Usuarios: number }[];
+}
+
+
+export type Page = 'dashboard' | 'events' | 'clients' | 'agenda' | 'reports' | 'settings' | 'userManagement' | 'announcements' | 'sendNotification' | 'budgets' | 'inquiries' | 'activityLog';
