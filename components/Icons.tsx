@@ -9,6 +9,15 @@ const iconProps = {
   strokeLinejoin: "round" as const,
 };
 
+export const ActivityLogIcon = () => (
+    <svg {...iconProps} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+        <path d="M12 20h9"></path>
+        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+        <path d="M8 5H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"></path>
+    </svg>
+);
+
+
 export const DashboardIcon = () => (
   <svg {...iconProps} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
     <path d="M3 13V5C3 3.89543 3.89543 3 5 3H19C20.1046 3 21 3.89543 21 5V13C21 14.1046 20.1046 15 19 15H5C3.89543 15 3 14.1046 3 13Z" />
