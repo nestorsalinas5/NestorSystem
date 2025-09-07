@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats } from './types';
 import { getDashboardInsights } from './services/geminiService';
@@ -28,12 +29,19 @@ const formatGuarani = (amount: number) =>
     new Intl.NumberFormat('es-PY', { style: 'currency', currency: 'PYG', minimumFractionDigits: 0 }).format(amount);
 
 const logActivity = async (action: string, details?: object) => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return; // Don't log if not authenticated
-    
-    await supabase.functions.invoke('log-activity', {
-        body: { action, details },
-    });
+    try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+        
+        const { error } = await supabase.functions.invoke('log-activity', {
+            body: { action, details },
+        });
+        if (error) {
+            console.error("Error logging activity:", error.message);
+        }
+    } catch (e) {
+        console.error("Exception in logActivity:", e);
+    }
 };
 
 
@@ -809,7 +817,7 @@ const App: React.FC = () => {
             showAlert('Error al guardar el evento: ' + error.message, 'error');
         } else {
             showAlert('Evento guardado exitosamente.', 'success');
-             await logActivity('event_created', { eventName: event.name });
+            await logActivity(isNew ? 'event_created' : 'event_updated', { eventName: event.name });
             if (isNew) {
                 const eventClient = clients.find(c => c.id === event.client_id);
                 if (eventClient && eventClient.email) {
@@ -831,11 +839,12 @@ const App: React.FC = () => {
 
     const deleteEvent = async (eventId: string) => {
         if (window.confirm('¿Estás seguro de que quieres eliminar este evento?')) {
+            const eventToDelete = events.find(e => e.id === eventId);
             const { error } = await supabase.from('events').delete().eq('id', eventId);
             if (error) showAlert('Error al eliminar el evento: ' + error.message, 'error');
             else {
                 showAlert('Evento eliminado.', 'success');
-                await logActivity('event_deleted');
+                await logActivity('event_deleted', { eventName: eventToDelete?.name || 'Desconocido' });
                 await fetchUserData(currentUser!.id);
             }
         }
@@ -862,7 +871,7 @@ const App: React.FC = () => {
             return null;
         } else {
             showAlert('Cliente guardado exitosamente.', 'success');
-             await logActivity(isNew ? 'client_created' : 'client_updated', { clientName: client.name });
+            await logActivity(isNew ? 'client_created' : 'client_updated', { clientName: client.name });
             if (isNew && client.email) {
                  await supabase.functions.invoke('send-welcome-email', {
                     body: { email: client.email, name: client.name, djCompanyName: currentUser!.company_name },
@@ -875,11 +884,12 @@ const App: React.FC = () => {
     
     const deleteClient = async (clientId: string) => {
         if (window.confirm('¿Estás seguro de que quieres eliminar este cliente? Esto no eliminará sus eventos asociados.')) {
+            const clientToDelete = clients.find(c => c.id === clientId);
             const { error } = await supabase.from('clients').delete().eq('id', clientId);
             if (error) showAlert('Error al eliminar el cliente: ' + error.message, 'error');
             else {
                 showAlert('Cliente eliminado.', 'success');
-                 await logActivity('client_deleted');
+                await logActivity('client_deleted', { clientName: clientToDelete?.name || 'Desconocido' });
                 await fetchClients(currentUser!.id);
             }
         }
@@ -957,11 +967,12 @@ const App: React.FC = () => {
 
     const deleteAnnouncement = async (id: string) => {
         if(window.confirm('¿Estás seguro de que quieres eliminar este anuncio?')) {
+            const announcementToDelete = announcements.find(a => a.id === id);
             const { error } = await supabase.from('announcements').delete().eq('id', id);
             if(error) showAlert('Error eliminando anuncio: ' + error.message, 'error');
             else {
                 showAlert('Anuncio eliminado.', 'success');
-                await logActivity('admin_announcement_deleted');
+                await logActivity('admin_announcement_deleted', { title: announcementToDelete?.title || 'Desconocido' });
                 await fetchAdminData();
             }
         }
@@ -1046,11 +1057,12 @@ const App: React.FC = () => {
 
     const deleteBudget = async (budgetId: string) => {
         if (window.confirm('¿Estás seguro de que quieres eliminar este presupuesto?')) {
+            const budgetToDelete = budgets.find(b => b.id === budgetId);
             const { error } = await supabase.from('budgets').delete().eq('id', budgetId);
             if (error) showAlert('Error al eliminar el presupuesto: ' + error.message, 'error');
             else {
                 showAlert('Presupuesto eliminado.', 'success');
-                 await logActivity('budget_deleted');
+                await logActivity('budget_deleted', { title: budgetToDelete?.title || 'Desconocido' });
                 await fetchBudgets(currentUser!.id);
             }
         }
@@ -1232,6 +1244,7 @@ const PageContent: React.FC<{
                         deleteBudget={props.deleteBudget} 
                         showAlert={props.showAlert}
                         isModalOpen={props.isBudgetModalOpen}
+                        // Fix: Corrected prop name from props.setIsModalOpen to props.setIsBudgetModalOpen
                         setIsModalOpen={props.setIsBudgetModalOpen}
                         selectedBudget={props.selectedBudget}
                         setSelectedBudget={props.setSelectedBudget}
