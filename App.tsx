@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats } from './types';
 import { getDashboardInsights, getInquiryReplySuggestion, getFollowUpEmailSuggestion, getBudgetItemsSuggestion } from './services/geminiService';
@@ -62,24 +63,120 @@ const AuthScreen: React.FC<{ showAlert: (message: string, type: 'success' | 'err
         setLoading(false);
     };
 
+    // Illustration for the left panel
+    const DjIllustration = () => (
+      <svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg" className="w-full h-auto">
+          <g transform="translate(20, 50) rotate(10 250 250) scale(0.9)">
+              {/* Base */}
+              <path d="M100 200 L120 150 L380 150 L400 200 L400 350 L100 350 Z" fill="#374151" />
+              <path d="M100 350 L120 300 L380 300 L400 350 Z" fill="#1F2937" />
+              
+              {/* Turntables */}
+              <circle cx="180" cy="225" r="50" fill="#111827" />
+              <circle cx="180" cy="225" r="45" fill="#4B5563" />
+              <circle cx="180"cy="225" r="10" fill="#111827" />
+
+              <circle cx="320" cy="225" r="50" fill="#111827" />
+              <circle cx="320" cy="225" r="45" fill="#4B5563" />
+              <circle cx="320" cy="225" r="10" fill="#111827" />
+              
+              {/* Mixer */}
+              <rect x="235" y="260" width="30" height="60" rx="5" fill="#4B5563" />
+              <rect x="230" y="270" width="40" height="8" rx="4" fill="#F87171" />
+              
+              <rect x="150" y="280" width="20" height="20" rx="3" fill="#D1D5DB" />
+              <rect x="180" y="280" width="20" height="20" rx="3" fill="#D1D5DB" />
+              <rect x="300" y="280" width="20" height="20" rx="3" fill="#D1D5DB" />
+              <rect x="330" y="280" width="20" height="20" rx="3" fill="#D1D5DB" />
+
+              {/* Floating UI elements */}
+              <g opacity="0.5">
+                  <rect x="50" y="150" width="80" height="40" rx="10" fill="#4F46E5" />
+                  <rect x="65" y="165" width="50" height="10" rx="5" fill="#A5B4FC" />
+
+                  <rect x="400" y="250" width="60" height="100" rx="10" fill="#EC4899" />
+                  <rect x="410" y="260" width="40" height="10" rx="5" fill="#FBCFE8" />
+                  <rect x="410" y="280" width="40" height="10" rx="5" fill="#FBCFE8" />
+                  <rect x="410" y="300" width="40" height="10" rx="5" fill="#FBCFE8" />
+              </g>
+          </g>
+      </svg>
+    );
+
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900">
-            <div className="p-8 bg-white dark:bg-gray-800 rounded-lg shadow-md w-96">
-                <h1 className="text-2xl font-bold mb-6 text-center text-gray-800 dark:text-gray-100">GestionSystemDj</h1>
-                
-                <form onSubmit={handleLogin}>
-                    <div className="mb-4">
-                        <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="login-email">Usuario (Email)</label>
-                        <input type="text" id="login-email" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
+        <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900 p-4">
+            <div className="flex w-full max-w-4xl lg:max-w-5xl bg-white dark:bg-gray-800 rounded-2xl shadow-2xl overflow-hidden">
+                {/* Left side */}
+                <div className="hidden lg:flex w-1/2 bg-gradient-to-br from-indigo-600 to-blue-800 p-12 flex-col justify-between relative overflow-hidden">
+                    <div className="absolute -top-16 -left-16 w-64 h-64 bg-white/10 rounded-full"></div>
+                    <div className="absolute -bottom-24 -right-10 w-72 h-72 bg-white/10 rounded-full"></div>
+                    <div>
+                        <h2 className="text-white text-3xl font-bold">GestionSystemDj</h2>
+                        <p className="text-white/80 mt-2">
+                            Tu centro de control para eventos inolvidables. Organiza, gestiona y analiza cada detalle de tu carrera.
+                        </p>
                     </div>
-                    <div className="mb-6">
-                        <label className="block text-gray-700 dark:text-gray-300 mb-2" htmlFor="login-password">Contraseña</label>
-                        <input type="password" id="login-password" value={password} onChange={e => setPassword(e.target.value)} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
+                    <div className="flex justify-center items-center">
+                        <DjIllustration />
                     </div>
-                    <button type="submit" disabled={loading} className="w-full bg-primary-600 text-white py-2 rounded-lg hover:bg-primary-700 transition duration-300 disabled:bg-primary-300">
-                        {loading ? 'Cargando...' : 'Iniciar Sesión'}
-                    </button>
-                </form>
+                    <div className="text-white/50 text-xs text-center">
+                        &copy; {new Date().getFullYear()} GestionSystemDj. Todos los derechos reservados.
+                    </div>
+                </div>
+
+                {/* Right side - Form */}
+                <div className="w-full lg:w-1/2 p-8 sm:p-12 flex flex-col justify-center">
+                    <div className="flex justify-start mb-10">
+                        {/* Using the ZONE-like logo from user image */}
+                        <div className="flex items-center gap-3">
+                             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-blue-600">
+                                <path fillRule="evenodd" clipRule="evenodd" d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0 2c6.075 0 11-4.925 11-11S18.075 1 12 1 1 5.925 1 12s4.925 11 11 11Z" fill="currentColor" fillOpacity="0.2"/>
+                                <path d="M15.414 8.586a2 2 0 1 0-2.828-2.828 2 2 0 0 0 2.828 2.828ZM8.586 15.414a2 2 0 1 0-2.828-2.828 2 2 0 0 0 2.828 2.828Z" fill="currentColor"/>
+                                <path d="m8.586 8.586 6.828 6.828" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                            </svg>
+                            <span className="text-3xl font-bold tracking-wider text-gray-800 dark:text-gray-100">ZONE</span>
+                        </div>
+                    </div>
+                    <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Iniciar Sesión</h1>
+                    <p className="text-gray-600 dark:text-gray-400 mt-2 mb-8">Ingresa tus credenciales para acceder a tu panel.</p>
+                    
+                    <form onSubmit={handleLogin} className="space-y-6">
+                        <div>
+                            <label className="block text-gray-700 dark:text-gray-300 mb-2 sr-only" htmlFor="login-email">Email</label>
+                            <input 
+                                type="email" 
+                                id="login-email" 
+                                placeholder="Email"
+                                value={email} 
+                                onChange={e => setEmail(e.target.value)} 
+                                className="w-full px-4 py-3 border-gray-200 bg-gray-100 dark:bg-gray-700 dark:border-gray-600 dark:text-white rounded-lg focus:ring-blue-500 focus:border-blue-500 transition" 
+                                required 
+                            />
+                        </div>
+                        <div>
+                             <label className="block text-gray-700 dark:text-gray-300 mb-2 sr-only" htmlFor="login-password">Contraseña</label>
+                            <input 
+                                type="password" 
+                                id="login-password" 
+                                placeholder="Contraseña"
+                                value={password} 
+                                onChange={e => setPassword(e.target.value)} 
+                                className="w-full px-4 py-3 border-gray-200 bg-gray-100 dark:bg-gray-700 dark:border-gray-600 dark:text-white rounded-lg focus:ring-blue-500 focus:border-blue-500 transition" 
+                                required 
+                            />
+                        </div>
+                        <div className="text-right">
+                             <a href="#" className="text-sm text-blue-600 hover:underline">¿Olvidaste la contraseña?</a>
+                        </div>
+                        <button 
+                            type="submit" 
+                            disabled={loading} 
+                            className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition duration-300 disabled:bg-blue-400 font-semibold"
+                        >
+                            {loading ? 'Cargando...' : 'Iniciar Sesión'}
+                        </button>
+                    </form>
+                </div>
             </div>
         </div>
     );
