@@ -126,17 +126,10 @@ const AuthScreen: React.FC<{ showAlert: (message: string, type: 'success' | 'err
 
                 {/* Right side - Form */}
                 <div className="w-full lg:w-1/2 p-8 sm:p-12 flex flex-col justify-center">
-                    <div className="flex justify-start mb-10">
-                        {/* Using the ZONE-like logo from user image */}
-                        <div className="flex items-center gap-3">
-                             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-blue-600">
-                                <path fillRule="evenodd" clipRule="evenodd" d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0 2c6.075 0 11-4.925 11-11S18.075 1 12 1 1 5.925 1 12s4.925 11 11 11Z" fill="currentColor" fillOpacity="0.2"/>
-                                <path d="M15.414 8.586a2 2 0 1 0-2.828-2.828 2 2 0 0 0 2.828 2.828ZM8.586 15.414a2 2 0 1 0-2.828-2.828 2 2 0 0 0 2.828 2.828Z" fill="currentColor"/>
-                                <path d="m8.586 8.586 6.828 6.828" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                            </svg>
-                            <span className="text-3xl font-bold tracking-wider text-gray-800 dark:text-gray-100">ZONE</span>
-                        </div>
+                    <div className="mb-10">
+                        <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-100">Bienvenido/a</h1>
                     </div>
+                    
                     <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Iniciar Sesión</h1>
                     <p className="text-gray-600 dark:text-gray-400 mt-2 mb-8">Ingresa tus credenciales para acceder a tu panel.</p>
                     
@@ -165,13 +158,10 @@ const AuthScreen: React.FC<{ showAlert: (message: string, type: 'success' | 'err
                                 required 
                             />
                         </div>
-                        <div className="text-right">
-                             <a href="#" className="text-sm text-blue-600 hover:underline">¿Olvidaste la contraseña?</a>
-                        </div>
                         <button 
                             type="submit" 
                             disabled={loading} 
-                            className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition duration-300 disabled:bg-blue-400 font-semibold"
+                            className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition duration-300 disabled:bg-blue-400 font-semibold !mt-10"
                         >
                             {loading ? 'Cargando...' : 'Iniciar Sesión'}
                         </button>
