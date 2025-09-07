@@ -29,15 +29,21 @@ const formatGuarani = (amount: number) =>
     new Intl.NumberFormat('es-PY', { style: 'currency', currency: 'PYG', minimumFractionDigits: 0 }).format(amount);
 
 const logActivity = async (action: string, details?: object) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return; // Don't log if user is not available
+
     try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
-        
-        const { error } = await supabase.functions.invoke('log-activity', {
-            body: { action, details },
+        const { error } = await supabase.from('activity_logs').insert({
+            user_id: user.id,
+            user_email: user.email,
+            action: action,
+            details: details,
         });
+
         if (error) {
-            console.error("Error logging activity:", error.message);
+            // This will fail if the RLS policy is not set up correctly.
+            // We log it but don't show an alert to the user to not interrupt their flow.
+            console.error('Error logging activity:', error.message);
         }
     } catch (e) {
         console.error("Exception in logActivity:", e);
@@ -1244,7 +1250,6 @@ const PageContent: React.FC<{
                         deleteBudget={props.deleteBudget} 
                         showAlert={props.showAlert}
                         isModalOpen={props.isBudgetModalOpen}
-                        // Fix: Corrected prop name from props.setIsModalOpen to props.setIsBudgetModalOpen
                         setIsModalOpen={props.setIsBudgetModalOpen}
                         selectedBudget={props.selectedBudget}
                         setSelectedBudget={props.setSelectedBudget}
