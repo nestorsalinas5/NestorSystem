@@ -554,32 +554,9 @@ const generateBudgetPDF = async (budget: Budget, currentUser: User, client: Clie
     return doc;
 };
 
-
-// Main App Component / Router
-const AppContainer: React.FC = () => {
-    // Get path from hash, fallback to empty string
-    const getPathFromHash = () => window.location.hash.substring(1); 
-    const [path, setPath] = useState(getPathFromHash());
-
-    useEffect(() => {
-        const onHashChange = () => setPath(getPathFromHash());
-        window.addEventListener('hashchange', onHashChange);
-        return () => window.removeEventListener('hashchange', onHashChange);
-    }, []);
-
-    if (path.startsWith('/inquiry/')) {
-        const userId = path.split('/')[2];
-        if (userId) {
-            return <PublicInquiryPage userId={userId} />;
-        }
-    }
-
-    return <App />;
-}
-
-
 // Main App Component
 const App: React.FC = () => {
+    // --- STATE ---
     const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') as 'light' | 'dark') || 'light');
     const [session, setSession] = useState<AuthSession | null>(null);
     const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -607,8 +584,18 @@ const App: React.FC = () => {
     // State for budget modal to enable cross-component actions
     const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
     const [selectedBudget, setSelectedBudget] = useState<Budget | null>(null);
+    
+    // --- ROUTING ---
+    const getPathFromHash = () => window.location.hash.substring(1); 
+    const [path, setPath] = useState(getPathFromHash());
 
-
+    useEffect(() => {
+        const onHashChange = () => setPath(getPathFromHash());
+        window.addEventListener('hashchange', onHashChange);
+        return () => window.removeEventListener('hashchange', onHashChange);
+    }, []);
+    
+    // --- FUNCTIONS ---
     const showAlert = (message: string, type: 'success' | 'error' = 'error') => {
         setAlertState({ isOpen: true, message, type });
     };
@@ -634,7 +621,6 @@ const App: React.FC = () => {
         const expiryDate = new Date(profileData.active_until);
         const today = new Date();
 
-        // BUG FIX: Auto-deactivate user if license has expired
         if (expiryDate < today && profileData.status === 'active') {
             const { error: updateError } = await supabase
                 .from('profiles')
@@ -644,7 +630,6 @@ const App: React.FC = () => {
             if (updateError) {
                 console.error("Error auto-updating user status to inactive:", updateError);
             } else {
-                // Update the local data immediately to reflect the change
                 profileData.status = 'inactive';
             }
         }
@@ -1071,6 +1056,13 @@ const App: React.FC = () => {
     if (loading) {
         return <div className="h-screen w-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200">Cargando...</div>;
     }
+
+    if (path.startsWith('/inquiry/')) {
+        const userId = path.split('/')[2];
+        if (userId) {
+            return <PublicInquiryPage userId={userId} />;
+        }
+    }
     
     return (
         <>
@@ -1181,7 +1173,6 @@ const PageContent: React.FC<{
                 ? <DashboardAdmin users={props.users} /> 
                 : <DashboardUser events={props.events} />;
         case 'inquiries':
-            // FIX: Pass currentUser prop to InquiriesPage to avoid incorrect async state handling.
             return <InquiriesPage 
                         inquiries={props.inquiries}
                         convertInquiryToBudget={props.convertInquiryToBudget}
@@ -1360,7 +1351,6 @@ const UserManagementPage: React.FC<{users: User[], saveUser: (user: User, passwo
         if (user) {
             setSelectedUser(user);
         } else {
-            // FIX: Explicitly cast to User to satisfy TypeScript
             const newUser: User = { 
                 id: '', 
                 email: '', 
@@ -1398,7 +1388,7 @@ const UserManagementPage: React.FC<{users: User[], saveUser: (user: User, passwo
                                 <td className="p-2">{user.email}</td>
                                 <td className="p-2">{user.company_name}</td>
                                 <td className="p-2"><span className={`px-2 py-1 text-xs font-semibold rounded-full ${user.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{user.status}</span></td>
-                                <td className="p-2">{new Date(user.activeUntil).toLocaleDateString()}</td>
+                                <td className="p-2">{new Date(user.activeUntil).toLocaleDateString('es-ES', { timeZone: 'UTC' })}</td>
                                 <td className="p-2"><button onClick={() => handleOpenModal(user)} className="text-primary-600 hover:underline">Editar</button></td>
                             </tr>
                         ))}
@@ -1990,7 +1980,6 @@ const BudgetsPage: React.FC<{
         try {
             const client = clients.find(c => c.id === budget.client_id);
             const doc = await generateBudgetPDF(budget, currentUser, client);
-            // FIX: Convert URL object to string for assignment to href.
             newTab.location.href = doc.output('bloburl').toString();
         } catch (e) {
             console.error("PDF generation failed:", e);
@@ -2226,11 +2215,9 @@ const InquiriesPage: React.FC<{
     inquiries: Inquiry[];
     fetchInquiries: () => Promise<void>;
     convertInquiryToBudget: (inquiry: Inquiry) => Promise<void>;
-    // FIX: Add currentUser to props to get user ID from the parent component.
     currentUser: User;
 }> = ({ inquiries, fetchInquiries, convertInquiryToBudget, currentUser }) => {
     
-    // FIX: Use currentUser prop instead of trying to fetch it asynchronously here. This resolves the property 'data' does not exist on Promise error.
     const publicLink = `${window.location.origin}${window.location.pathname}#/inquiry/${currentUser.id}`;
     const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(publicLink)}`;
 
@@ -2389,5 +2376,4 @@ const PublicInquiryPage: React.FC<{ userId: string }> = ({ userId }) => {
 };
 
 
-// Router in index.tsx is better, but this works for this environment
-export default AppContainer;
+export default App;
