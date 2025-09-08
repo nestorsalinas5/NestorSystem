@@ -1,5 +1,5 @@
 {
-  "name": "NestorSystemDj",
+  "name": "GestionSystem",
   "description": "An elegant web application for event management, providing a dashboard with analytics, client and event tracking, a calendar agenda, and powerful reporting capabilities, all enhanced with AI insights from Gemini.",
   "requestFramePermissions": []
 }
