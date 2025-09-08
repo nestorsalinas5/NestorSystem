@@ -53,10 +53,10 @@ const logActivity = async (action: string, details?: object) => {
 
 const Logo: React.FC<{ size?: 'large' | 'small', className?: string }> = ({ size = 'small', className = '' }) => {
     const iconSize = size === 'large' ? 'w-12 h-12' : 'w-9 h-9';
-    const textSize = size === 'large' ? 'text-3xl' : 'text-2xl';
+    const textSize = size === 'large' ? 'text-3xl' : 'text-xl';
     
     return (
-        <div className={`flex items-center gap-3 ${className}`}>
+        <div className={`flex items-center gap-2 ${className}`}>
             <LogoIconOnly className={iconSize} />
             <span className={`${textSize} font-bold whitespace-nowrap`}>
                 Gestion<span style={{color: '#2DD4BF'}}>SystemDj</span>
