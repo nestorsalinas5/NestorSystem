@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats } from './types';
 import { getDashboardInsights, getInquiryReplySuggestion, getFollowUpEmailSuggestion, getBudgetItemsSuggestion } from './services/geminiService';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, PdfIcon, EditIcon, EmailIcon, InquiryIcon, ActivityLogIcon, SparklesIcon } from './components/Icons.tsx';
+import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, PdfIcon, EditIcon, EmailIcon, InquiryIcon, ActivityLogIcon, SparklesIcon, LogoIconOnly } from './components/Icons.tsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { createClient, AuthSession } from '@supabase/supabase-js';
@@ -50,6 +50,21 @@ const logActivity = async (action: string, details?: object) => {
 
 
 // --- AUTH SCREEN COMPONENT ---
+
+const Logo: React.FC<{ size?: 'large' | 'small', className?: string }> = ({ size = 'small', className = '' }) => {
+    const iconSize = size === 'large' ? 'w-12 h-12' : 'w-9 h-9';
+    const textSize = size === 'large' ? 'text-3xl' : 'text-2xl';
+    
+    return (
+        <div className={`flex items-center gap-3 ${className}`}>
+            <LogoIconOnly className={iconSize} />
+            <span className={`${textSize} font-bold whitespace-nowrap`}>
+                Gestion<span style={{color: '#2DD4BF'}}>SystemDj</span>
+            </span>
+        </div>
+    );
+};
+
 const AuthScreen: React.FC<{ showAlert: (message: string, type: 'success' | 'error') => void; }> = ({ showAlert }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -111,7 +126,7 @@ const AuthScreen: React.FC<{ showAlert: (message: string, type: 'success' | 'err
                     <div className="absolute -top-16 -left-16 w-64 h-64 bg-white/10 rounded-full"></div>
                     <div className="absolute -bottom-24 -right-10 w-72 h-72 bg-white/10 rounded-full"></div>
                     <div>
-                        <h2 className="text-white text-3xl font-bold">GestionSystemDj</h2>
+                        <Logo size="large" className="text-white" />
                         <p className="text-white/80 mt-2">
                             Tu centro de control para eventos inolvidables. Organiza, gestiona y analiza cada detalle de tu carrera.
                         </p>
@@ -283,7 +298,7 @@ const Sidebar: React.FC<{
         <aside className={`fixed md:relative inset-y-0 left-0 bg-white dark:bg-gray-800 shadow-lg z-30 w-64 transform ${isOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 transition-transform duration-300 ease-in-out`}>
             <div className="flex flex-col h-full">
                 <div className="p-4 border-b dark:border-gray-700 flex items-center justify-between">
-                    <h1 className="text-2xl font-bold text-primary-600 dark:text-primary-400">GestionSystem</h1>
+                    <Logo size="small" className="text-gray-800 dark:text-gray-100" />
                     <button onClick={() => setIsOpen(false)} className="md:hidden text-gray-500 dark:text-gray-400">
                         <CloseIcon />
                     </button>
@@ -649,7 +664,7 @@ const generateBudgetPDF = async (budget: Budget, currentUser: User, client: Clie
             const pageCount = (doc as any).internal.getNumberOfPages ? (doc as any).internal.getNumberOfPages() : 0;
             doc.setFontSize(8);
             doc.setTextColor(150);
-            doc.text(`Generado por GestionSystemDj`, pageMargin, doc.internal.pageSize.height - 10);
+            doc.text(`Generado por GestionSystem`, pageMargin, doc.internal.pageSize.height - 10);
             doc.text(`Página ${data.pageNumber} de ${pageCount}`, doc.internal.pageSize.width - pageMargin, doc.internal.pageSize.height - 10, { align: 'right' });
         }
     });
@@ -1994,7 +2009,7 @@ const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events,
                 const pageCount = (doc as any).internal.getNumberOfPages ? (doc as any).internal.getNumberOfPages() : 0;
                 doc.setFontSize(8);
                 doc.setTextColor(150);
-                doc.text(`Generado por GestionSystemDj`, data.settings.margin.left, doc.internal.pageSize.height - 10);
+                doc.text(`Generado por GestionSystem`, data.settings.margin.left, doc.internal.pageSize.height - 10);
                 doc.text(`Página ${data.pageNumber} de ${pageCount}`, doc.internal.pageSize.width - data.settings.margin.right, doc.internal.pageSize.height - 10, { align: 'right' });
             },
             margin: { left: pageMargin, right: pageMargin }
