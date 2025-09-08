@@ -1,11 +1,20 @@
-<div align="center">
-<img src="URL_DE_TU_LOGO_AQUI" alt="Logo de GestionSystemDj" width="120" />
+
 <h1>GestionSystemDj</h1>
 <p><strong>Tu centro de control todo-en-uno para la gestión de eventos.</strong></p>
 <p>Una aplicación web moderna y completa diseñada para DJs y organizadores de eventos, construida con React, TypeScript, Supabase y potenciada con la IA de Google Gemini.</p>
 </div>
 <div align="center">
 <!-- Inserta aquí un screenshot de la app, por ejemplo del dashboard -->
+  Login
+<img width="1364" height="629" alt="image" src="https://github.com/user-attachments/assets/f62a00d2-9a64-4409-85d2-50116466abd5" />
+
+Admin
+<img width="1366" height="768" alt="image" src="https://github.com/user-attachments/assets/b6775faf-6911-4c88-83fe-1f510f29f563" />
+
+User:
+<img width="1366" height="768" alt="image" src="https://github.com/user-attachments/assets/6aa852e8-96e7-4d6f-8cba-94ac84b9af54" />
+
+
 <img src="URL_DE_UN_SCREENSHOT_AQUI" alt="Dashboard de GestionSystemDj" />
 </div>
 
