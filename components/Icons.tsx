@@ -220,3 +220,18 @@ export const SparklesIcon = () => (
       <path d="M19 13L17.93 15.93L15 17L17.93 18.07L19 21L20.07 18.07L23 17L20.07 15.93L19 13Z" />
     </svg>
 );
+
+export const LogoIconOnly = ({ className = 'w-10 h-10' }: { className?: string }) => (
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" className={className}>
+        <circle cx="12" cy="12" r="12" fill="#1f2937"/>
+        <g>
+            <path d="M4 13V17C4 18.1046 4.89543 19 6 19H8C9.10457 19 10 18.1046 10 17V13" stroke="#2DD4BF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+            <path d="M20 13V17C20 18.1046 19.1046 19 18 19H16C14.8954 19 14 18.1046 14 17V13" stroke="#2DD4BF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+            <path d="M5.5 13.5V16.5" stroke="#EC4899" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M4 13C4 8.58172 7.58172 5 12 5C16.4183 5 20 8.58172 20 13" stroke="#2DD4BF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+            <path d="M10 15L12 17L16.5 10.5" stroke="#2DD4BF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+            <path d="M12 17L14 9" stroke="#2DD4BF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+            <path d="M15.5 9.5L14 9L13.5 10.5" stroke="#2DD4BF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="#2DD4BF"/>
+        </g>
+    </svg>
+);
