@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats, ChatMessage } from './types';
 import { getDashboardInsights, getInquiryReplySuggestion, getFollowUpEmailSuggestion, getBudgetItemsSuggestion } from './services/geminiService';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, PdfIcon, EditIcon, EmailIcon, InquiryIcon, ActivityLogIcon, SparklesIcon, LogoIconOnly, MessageSquareIcon, BrainCircuitIcon } from './components/Icons.tsx';
+import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, PdfIcon, EditIcon, EmailIcon, InquiryIcon, ActivityLogIcon, SparklesIcon, LogoIconOnly, MessageSquareIcon, BrainCircuitIcon, DatabaseIcon } from './components/Icons.tsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { createClient, AuthSession } from '@supabase/supabase-js';
@@ -273,7 +273,8 @@ const Sidebar: React.FC<{
                 { page: 'announcements', label: 'Anuncios', icon: <AnnouncementIcon /> },
                 { page: 'sendNotification', label: 'Enviar Notificación', icon: <SendIcon /> },
                 { page: 'supportChat', label: 'Mensajes de Soporte', icon: <MessageSquareIcon /> },
-                { page: 'activityLog', label: 'Registro de Actividad', icon: <ActivityLogIcon /> }
+                { page: 'activityLog', label: 'Registro de Actividad', icon: <ActivityLogIcon /> },
+                { page: 'databaseSetup', label: 'Configuración de BD', icon: <DatabaseIcon /> }
             );
         } else {
              items.push(
@@ -579,6 +580,13 @@ const SettingsPage: React.FC<{
                         <input type="file" onChange={handleFileChange} ref={fileInputRef} accept="image/png, image/jpeg" className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
                     </div>
                 </div>
+                 {currentUser.role === 'admin' && (
+                    <div>
+                        <label htmlFor="notification_email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email para Notificaciones de Chat</label>
+                        <input type="email" id="notification_email" name="notification_email" value={user.notification_email || ''} onChange={handleChange} placeholder="admin@example.com" className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
+                        <p className="text-xs text-gray-500 mt-1">Recibe un aviso por correo cuando un usuario te envíe un mensaje de soporte.</p>
+                    </div>
+                 )}
                 <div className="border-t dark:border-gray-700 pt-6">
                     <button type="submit" disabled={isSaving} className="w-full bg-primary-600 text-white py-2 rounded-lg hover:bg-primary-700 transition duration-300 disabled:bg-primary-400">
                         {isSaving ? 'Guardando...' : 'Guardar Cambios'}
@@ -756,6 +764,7 @@ const App: React.FC = () => {
     // Chat
     const [chatUsers, setChatUsers] = useState<ChatUser[]>([]);
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+    const [chatError, setChatError] = useState<string | null>(null);
 
 
     // State for budget modal to enable cross-component actions
@@ -946,25 +955,45 @@ const App: React.FC = () => {
 
      // --- CHAT REALTIME ---
     const fetchChatUsers = useCallback(async () => {
-        const { data, error } = await supabase.rpc('get_chat_users_with_details');
-        if (error) console.error("Error fetching chat users", error);
-        else setChatUsers((data as ChatUser[]) || []);
+        setChatError(null);
+        try {
+            const { data, error } = await supabase.rpc('get_chat_users_with_details');
+            if (error) throw error;
+            setChatUsers((data as ChatUser[]) || []);
+        } catch (error: any) {
+            console.error("Error fetching chat users", error);
+            if (error.message.includes("404")) { // Simple check for "Not Found" which implies missing function
+                 setChatError("La función de chat no está configurada en la base de datos.");
+            } else {
+                 setChatError("Error al cargar usuarios del chat.");
+            }
+        }
     }, []);
 
     useEffect(() => {
         if (!currentUser) return;
 
         const fetchInitialMessages = async () => {
-             if (currentUser.role === 'admin') {
-                await fetchChatUsers();
-                const { data: allMessages, error } = await supabase.from('chat_messages').select('*').order('created_at');
-                if (error) console.error("Error fetching all messages", error);
-                else setChatMessages((allMessages as ChatMessage[]) || []);
-             } else {
-                const { data, error } = await supabase.from('chat_messages').select('*').eq('user_id', currentUser.id).order('created_at');
-                if (error) console.error("Error fetching messages", error);
-                else setChatMessages((data as ChatMessage[]) || []);
-             }
+             setChatError(null);
+             try {
+                 if (currentUser.role === 'admin') {
+                    await fetchChatUsers();
+                    const { data: allMessages, error } = await supabase.from('chat_messages').select('*').order('created_at');
+                    if (error) throw error;
+                    setChatMessages((allMessages as ChatMessage[]) || []);
+                 } else {
+                    const { data, error } = await supabase.from('chat_messages').select('*').eq('user_id', currentUser.id).order('created_at');
+                    if (error) throw error;
+                    setChatMessages((data as ChatMessage[]) || []);
+                 }
+            } catch (error: any) {
+                console.error("Error fetching messages", error);
+                if (error.message.includes("does not exist")) { // More specific check for missing table
+                    setChatError("La tabla de chat no está configurada en la base de datos.");
+                } else {
+                    setChatError("Error al cargar los mensajes.");
+                }
+            }
         }
         fetchInitialMessages();
 
@@ -1100,7 +1129,7 @@ const App: React.FC = () => {
 
     const saveUser = async (user: User, password?: string) => {
         const isNewUser = !user.id;
-        const { id, role, status, activeUntil, company_name, companyLogoUrl } = user;
+        const { id, role, status, activeUntil, company_name, companyLogoUrl, notification_email } = user;
 
         if (isNewUser) {
              if (!user.email || !password) {
@@ -1117,8 +1146,12 @@ const App: React.FC = () => {
                 await fetchAdminData();
             }
         } else {
-            const updateData = { role, status, active_until: activeUntil, company_name, company_logo_url: companyLogoUrl };
+            const updateData: any = { role, status, active_until: activeUntil, company_name, company_logo_url: companyLogoUrl };
+            if (currentUser?.role === 'admin') {
+                updateData.notification_email = notification_email;
+            }
             const { error } = await supabase.from('profiles').update(updateData).eq('id', id);
+
             if (error) showAlert("Error actualizando perfil: " + error.message, 'error');
             else {
                 await fetchAdminData();
@@ -1394,6 +1427,7 @@ const App: React.FC = () => {
                             chatUsers={chatUsers}
                             chatMessages={chatMessages}
                             fetchChatUsers={fetchChatUsers}
+                            chatError={chatError}
                         />
                     </main>
                     {isAnnouncementModalOpen && activeAnnouncement && (
@@ -1451,6 +1485,7 @@ const PageContent: React.FC<{
     chatUsers: ChatUser[];
     chatMessages: ChatMessage[];
     fetchChatUsers: () => Promise<void>;
+    chatError: string | null;
 }> = (props) => {
     switch (props.currentPage) {
         case 'dashboard':
@@ -1497,6 +1532,8 @@ const PageContent: React.FC<{
             return <SendNotificationPage sendNotificationToAll={props.sendNotificationToAll} />;
         case 'activityLog':
             return <ActivityLogPage logs={props.activityLogs} />;
+        case 'databaseSetup':
+            return <DatabaseSetupPage />;
         case 'coach':
             return <CoachPage />;
         case 'supportChat':
@@ -1505,6 +1542,8 @@ const PageContent: React.FC<{
                         allMessages={props.chatMessages}
                         chatUsers={props.chatUsers}
                         fetchChatUsers={props.fetchChatUsers}
+                        chatError={props.chatError}
+                        setCurrentPage={props.setCurrentPage}
                     />;
         default:
             return <div>Página no encontrada o en construcción.</div>;
@@ -1633,6 +1672,11 @@ const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
     
     useEffect(() => {
         const fetchInsights = async () => {
+            if (!ai) {
+                setInsights("La funcionalidad de IA no está disponible. Configure la API Key.");
+                setLoadingInsights(false);
+                return;
+            }
             if (eventCount > 0) {
                 setLoadingInsights(true);
                 try {
@@ -2506,9 +2550,10 @@ const BudgetFormModal: React.FC<{
                             className="w-full p-2 mt-2 border rounded dark:bg-gray-700 dark:border-gray-600"
                             rows={2}
                         />
-                        <button type="button" onClick={handleGetItemSuggestions} disabled={isAiLoading} className="mt-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded disabled:bg-blue-300">
+                        <button type="button" onClick={handleGetItemSuggestions} disabled={isAiLoading || !ai} className="mt-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded disabled:bg-blue-300">
                             {isAiLoading ? 'Pensando...' : 'Sugerir Items'}
                         </button>
+                        {!ai && <p className="text-xs text-yellow-600 mt-2">La IA no está disponible. Configure la API Key.</p>}
                         {aiSuggestions.length > 0 && (
                             <div className="mt-3">
                                 <p className="text-sm font-medium">Sugerencias:</p>
@@ -2698,7 +2743,7 @@ const InquiriesPage: React.FC<{
                                         >
                                             Convertir a Presupuesto
                                         </button>
-                                        <button title="Sugerencia de Respuesta IA" onClick={() => onGetSuggestion(inquiry)} className="p-1.5 rounded text-yellow-500 hover:bg-yellow-100 dark:hover:bg-yellow-900/50">
+                                        <button title="Sugerencia de Respuesta IA" onClick={() => onGetSuggestion(inquiry)} className="p-1.5 rounded text-yellow-500 hover:bg-yellow-100 dark:hover:bg-yellow-900/50" disabled={!ai}>
                                             <SparklesIcon />
                                         </button>
                                     </td>
@@ -2851,7 +2896,14 @@ const CoachPage: React.FC = () => {
     };
 
     if (!ai) {
-        return <div className="p-6 bg-white dark:bg-gray-800 rounded-lg shadow text-center">La funcionalidad del Coach IA no está disponible. Por favor, configura la API Key.</div>;
+        return (
+            <div className="p-6 bg-white dark:bg-gray-800 rounded-lg shadow text-center border-l-4 border-yellow-500">
+                <h3 className="text-lg font-semibold text-yellow-800 dark:text-yellow-300">Función de IA No Disponible</h3>
+                <p className="mt-2 text-gray-600 dark:text-gray-400">
+                    La funcionalidad del Coach IA no está disponible. Para activarla, el administrador del sistema debe configurar la variable de entorno `API_KEY` de Google Gemini.
+                </p>
+            </div>
+        );
     }
 
     return (
@@ -2889,7 +2941,9 @@ const SupportChatPage: React.FC<{
     allMessages: ChatMessage[];
     chatUsers: ChatUser[];
     fetchChatUsers: () => void;
-}> = ({ currentUser, allMessages, chatUsers, fetchChatUsers }) => {
+    chatError: string | null;
+    setCurrentPage: (page: Page) => void;
+}> = ({ currentUser, allMessages, chatUsers, fetchChatUsers, chatError, setCurrentPage }) => {
     const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
     const markMessagesAsRead = useCallback(async (userId: string) => {
@@ -2915,6 +2969,31 @@ const SupportChatPage: React.FC<{
     const handleSelectUser = (userId: string) => {
         setSelectedUserId(userId);
     };
+
+    if (chatError && currentUser.role === 'admin') {
+        return (
+            <div className="p-6 bg-white dark:bg-gray-800 rounded-lg shadow text-center border-l-4 border-red-500">
+                <h3 className="text-lg font-semibold text-red-800 dark:text-red-300">Error de Configuración del Chat</h3>
+                <p className="mt-2 text-gray-600 dark:text-gray-400">
+                    {chatError}
+                </p>
+                 <p className="mt-4">
+                    Por favor, ve a la página de <button onClick={() => setCurrentPage('databaseSetup')} className="text-primary-600 hover:underline font-semibold">Configuración de BD</button> y sigue las instrucciones para activar el chat.
+                 </p>
+            </div>
+        );
+    }
+    
+    if (chatError && currentUser.role === 'user') {
+         return (
+             <div className="p-6 bg-white dark:bg-gray-800 rounded-lg shadow text-center border-l-4 border-yellow-500">
+                <h3 className="text-lg font-semibold text-yellow-800 dark:text-yellow-300">Chat No Disponible</h3>
+                <p className="mt-2 text-gray-600 dark:text-gray-400">
+                    La función de chat de soporte no está disponible en este momento. Por favor, contacta al administrador.
+                </p>
+            </div>
+        )
+    }
 
     if (currentUser.role === 'admin') {
         return (
@@ -3016,6 +3095,226 @@ const ChatWindow: React.FC<{
                 />
                 <button type="submit" className="px-4 py-2 bg-primary-600 text-white rounded-r-lg disabled:bg-primary-300" disabled={!newMessage.trim()}><SendIcon /></button>
             </form>
+        </div>
+    );
+};
+
+// --- NEW DB SETUP PAGE FOR ADMIN ---
+const DatabaseSetupPage: React.FC = () => {
+    
+    const CodeBlock: React.FC<{ title: string; sql: string }> = ({ title, sql }) => {
+        const [copied, setCopied] = useState(false);
+        const handleCopy = () => {
+            navigator.clipboard.writeText(sql.trim());
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        };
+        return (
+            <div className="mb-6">
+                <h4 className="text-lg font-semibold mb-2">{title}</h4>
+                <div className="relative bg-gray-100 dark:bg-gray-900 rounded-lg p-4 font-mono text-sm overflow-x-auto">
+                    <button onClick={handleCopy} className="absolute top-2 right-2 px-2 py-1 bg-gray-300 dark:bg-gray-700 text-xs rounded">
+                        {copied ? '¡Copiado!' : 'Copiar'}
+                    </button>
+                    <pre><code>{sql.trim()}</code></pre>
+                </div>
+            </div>
+        );
+    };
+
+    const sqlSteps = {
+        chatTable: `
+CREATE TABLE public.chat_messages (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  sender_is_admin boolean NOT NULL DEFAULT false,
+  content text NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  is_read_by_user boolean NOT NULL DEFAULT false,
+  is_read_by_admin boolean NOT NULL DEFAULT false,
+  CONSTRAINT chat_messages_pkey PRIMARY KEY (id),
+  CONSTRAINT chat_messages_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow admin full access" ON public.chat_messages FOR ALL
+TO authenticated
+USING ( (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin' );
+
+CREATE POLICY "Allow user access to their own messages" ON public.chat_messages FOR ALL
+TO authenticated
+USING ( user_id = auth.uid() );`,
+        
+        rpcFunction: `
+CREATE OR REPLACE FUNCTION get_chat_users_with_details()
+RETURNS TABLE(user_id uuid, company_name text, email text, last_message_at timestamptz, unread_count bigint)
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  SELECT
+    u.id as user_id,
+    p.company_name,
+    u.email,
+    MAX(cm.created_at) as last_message_at,
+    COUNT(CASE WHEN cm.is_read_by_admin = false AND cm.sender_is_admin = false THEN 1 END) as unread_count
+  FROM
+    auth.users u
+  JOIN
+    public.profiles p ON u.id = p.id
+  LEFT JOIN
+    public.chat_messages cm ON u.id = cm.user_id
+  WHERE
+    p.role = 'user'
+  GROUP BY
+    u.id, p.company_name, u.email
+  ORDER BY
+    last_message_at DESC NULLS LAST;
+$$;`,
+        notificationColumn: `
+ALTER TABLE public.profiles
+ADD COLUMN notification_email TEXT;`,
+
+        triggerFunction: `
+CREATE OR REPLACE FUNCTION notify_admin_on_new_message()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  admin_email TEXT;
+  user_company_name TEXT;
+BEGIN
+  -- Only trigger for messages sent by users (not admins)
+  IF NEW.sender_is_admin = false THEN
+    -- Find an admin's notification email (takes the first one found)
+    SELECT notification_email INTO admin_email FROM public.profiles WHERE role = 'admin' AND notification_email IS NOT NULL LIMIT 1;
+
+    -- Find the user's company name
+    SELECT company_name INTO user_company_name FROM public.profiles WHERE id = NEW.user_id;
+
+    -- If an admin notification email is configured, invoke the edge function
+    IF admin_email IS NOT NULL THEN
+      PERFORM net.http_post(
+        url:= supabase_url() || '/functions/v1/send-chat-notification',
+        headers:='{"Authorization": "Bearer ' || supa_service_role_key() || '", "Content-Type": "application/json"}'::jsonb,
+        body:=jsonb_build_object(
+          'admin_email', admin_email,
+          'user_company_name', user_company_name,
+          'message_content', NEW.content
+        )
+      );
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+-- Helper functions to get Supabase URL and Service Role Key (run these first)
+CREATE OR REPLACE FUNCTION supabase_url()
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT 'YOUR_SUPABASE_URL_HERE';
+$$;
+
+CREATE OR REPLACE FUNCTION supa_service_role_key()
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT 'YOUR_SUPABASE_SERVICE_ROLE_KEY_HERE';
+$$;
+`,
+    trigger: `
+CREATE TRIGGER on_new_message_notify_admin
+AFTER INSERT ON public.chat_messages
+FOR EACH ROW
+EXECUTE FUNCTION notify_admin_on_new_message();
+`
+    };
+
+    return (
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow space-y-6">
+            <h3 className="text-xl font-semibold">Configuración de la Base de Datos para el Chat</h3>
+            <p className="text-gray-600 dark:text-gray-400">Para que la funcionalidad del chat y las notificaciones por correo funcionen, necesitas ejecutar los siguientes scripts SQL en tu editor de SQL de Supabase. Cópialos y pégalos en orden.</p>
+
+            <CodeBlock title="Paso 1: Crear Tabla de Mensajes y Políticas de Seguridad" sql={sqlSteps.chatTable} />
+            <CodeBlock title="Paso 2: Crear Función para Obtener Usuarios del Chat" sql={sqlSteps.rpcFunction} />
+            <CodeBlock title="Paso 3: Añadir Columna para Email de Notificación" sql={sqlSteps.notificationColumn} />
+            
+            <div>
+                <h4 className="text-lg font-semibold mb-2">Paso 4: Crear Funciones y Trigger para Notificaciones por Email</h4>
+                <p className="text-sm text-gray-500 mb-2">
+                    <strong>Importante:</strong> Primero, reemplaza `YOUR_SUPABASE_URL_HERE` y `YOUR_SUPABASE_SERVICE_ROLE_KEY_HERE` con tus propios valores de Supabase en el siguiente script. Luego, ejecuta el script completo.
+                </p>
+                <CodeBlock title="Función y Helpers del Trigger" sql={sqlSteps.triggerFunction} />
+            </div>
+
+            <CodeBlock title="Paso 5: Crear el Trigger" sql={sqlSteps.trigger} />
+
+            <div>
+                <h4 className="text-lg font-semibold mb-2">Paso 6: Desplegar la Edge Function</h4>
+                <p className="text-gray-600 dark:text-gray-400 mb-2">
+                    Finalmente, necesitas crear una Supabase Edge Function para enviar los correos. Sigue estos pasos:
+                </p>
+                <ol className="list-decimal list-inside space-y-2 text-sm">
+                    <li>Instala la <a href="https://supabase.com/docs/guides/cli" target="_blank" rel="noopener noreferrer" className="text-primary-500 hover:underline">Supabase CLI</a>.</li>
+                    <li>Ejecuta `supabase functions new send-chat-notification`.</li>
+                    <li>Reemplaza el contenido de `supabase/functions/send-chat-notification/index.ts` con el código de abajo.</li>
+                    <li>Asegúrate de configurar un proveedor de correo (como Resend) y que tu función pueda enviarlos. Este ejemplo usa una función hipotética `resend-email-send`.</li>
+                    <li>Despliega la función con `supabase functions deploy send-chat-notification`.</li>
+                </ol>
+                <CodeBlock title="Código para supabase/functions/send-chat-notification/index.ts" sql={`
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+// NOTA: Este es un ejemplo. Necesitarás tu propia lógica para enviar emails.
+// Este ejemplo asume que tienes otra Edge Function o un servicio para enviar correos.
+async function sendEmail(supabaseAdmin: any, to: string, subject: string, html: string) {
+    // Reemplaza esto con tu lógica de envío de email (ej. Resend, SendGrid)
+    // Ejemplo usando una función 'resend' hipotética:
+    const { error } = await supabaseAdmin.functions.invoke('resend-email-send', {
+        body: { from: 'support@yourdomain.com', to, subject, html }
+    });
+    if (error) throw new Error(\`Failed to send email: \${error.message}\`);
+}
+
+serve(async (req) => {
+  try {
+    const { admin_email, user_company_name, message_content } = await req.json();
+
+    const supabaseAdmin = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+    );
+
+    await sendEmail(
+      supabaseAdmin,
+      admin_email,
+      \`Nuevo mensaje de soporte de \${user_company_name}\`,
+      \`
+        <p>Has recibido un nuevo mensaje de <strong>\${user_company_name}</strong>.</p>
+        <p><strong>Mensaje:</strong></p>
+        <blockquote style="padding: 10px; border-left: 3px solid #ccc; margin-left: 0;">\${message_content}</blockquote>
+        <p>Inicia sesión en tu panel para responder.</p>
+      \`
+    );
+
+    return new Response(JSON.stringify({ message: "Email sent" }), {
+      headers: { "Content-Type": "application/json" },
+      status: 200,
+    });
+  } catch (error) {
+    console.error("Function error:", error);
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { "Content-Type": "application/json" },
+      status: 500,
+    });
+  }
+});`} />
+            </div>
         </div>
     );
 };
