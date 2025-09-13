@@ -1,9 +1,14 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats, ChatMessage } from './types';
 import { getDashboardInsights, getInquiryReplySuggestion, getFollowUpEmailSuggestion, getBudgetItemsSuggestion } from './services/geminiService';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, PdfIcon, EditIcon, EmailIcon, InquiryIcon, ActivityLogIcon, SparklesIcon, LogoIconOnly, MessageSquareIcon, BrainCircuitIcon, DatabaseIcon } from './components/Icons.tsx';
+import { 
+    DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, 
+    LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, 
+    SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, 
+    PdfIcon, EditIcon, EmailIcon, InquiryIcon, ActivityLogIcon, SparklesIcon, LogoIconOnly, 
+    MessageSquareIcon, BrainCircuitIcon, DatabaseIcon 
+} from './components/Icons.tsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { createClient, AuthSession } from '@supabase/supabase-js';
@@ -61,8 +66,142 @@ const logActivity = async (action: string, details?: object) => {
     }
 };
 
+const getBase64ImageFromUrl = (url: string): Promise<string | null> => {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return resolve(null);
+            ctx.drawImage(img, 0, 0);
+            const dataURL = canvas.toDataURL('image/png');
+            resolve(dataURL);
+        };
+        img.onerror = () => resolve(null);
+        img.src = url;
+    });
+};
 
-// --- AUTH SCREEN COMPONENT ---
+const generateBudgetPDF = async (budget: Budget, currentUser: User, client: Client | undefined) => {
+    const doc = new jsPDF();
+    const pageMargin = 15;
+    const headStyles = { fillColor: '#2563eb', textColor: '#ffffff', fontStyle: 'bold' as 'bold' };
+
+    // --- PDF Header ---
+    const logoDataUrl = currentUser.companyLogoUrl ? await getBase64ImageFromUrl(currentUser.companyLogoUrl) : null;
+    if (logoDataUrl) {
+        doc.addImage(logoDataUrl, 'PNG', pageMargin, 15, 25, 25);
+    }
+    
+    doc.setFontSize(22);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor('#1d4ed8');
+    doc.text(currentUser.company_name, logoDataUrl ? pageMargin + 30 : pageMargin, 25);
+    
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100);
+    doc.text(`Presupuesto / Cotización`, logoDataUrl ? pageMargin + 30 : pageMargin, 32);
+
+    // --- Client and Budget Info (using a borderless table for alignment) ---
+    const clientInfo = `CLIENTE:\n${client?.name || 'N/A'}\n${client?.phone || ''}\n${client?.email || ''}`;
+    const budgetInfo = `NÚMERO DE PRESUPUESTO:\nFECHA DE EMISIÓN:\nVÁLIDO HASTA:`;
+    const budgetValues = `${budget.id.substring(0, 8).toUpperCase()}\n${new Date(budget.created_at).toLocaleDateString()}\n${budget.valid_until ? new Date(budget.valid_until).toLocaleDateString() : 'N/A'}`;
+        
+    autoTable(doc, {
+        startY: 50,
+        body: [[
+            { content: clientInfo, styles: { cellPadding: { top: 0, left: 0 } } },
+            { content: budgetInfo, styles: { halign: 'left', cellPadding: { top: 0, left: 0 } } },
+            { content: budgetValues, styles: { halign: 'right', cellPadding: { top: 0, right: 0 }, fontStyle: 'bold' } },
+        ]],
+        theme: 'plain',
+        styles: { fontSize: 9, font: 'helvetica' },
+        columnStyles: {
+            0: { cellWidth: 'auto' },
+            1: { cellWidth: 40 },
+            2: { cellWidth: 'auto' },
+        },
+    });
+
+    // --- Items Table ---
+    const itemsTableStartY = (doc as any).lastAutoTable.finalY + 10;
+    const subtotal = budget.items.reduce((acc, item) => acc + item.quantity * item.price, 0);
+    const total = subtotal - budget.discount;
+    
+    const tableBody = budget.items.map(item => [
+        item.description,
+        item.quantity,
+        formatGuarani(item.price),
+        formatGuarani(item.quantity * item.price)
+    ]);
+
+    autoTable(doc, {
+        startY: itemsTableStartY,
+        head: [['Descripción', 'Cantidad', 'Precio Unit.', 'Total']],
+        body: tableBody,
+        theme: 'grid',
+        headStyles: headStyles,
+        styles: { fontSize: 9, cellPadding: 2, font: 'helvetica' },
+        columnStyles: {
+            1: { halign: 'center' },
+            2: { halign: 'right' },
+            3: { halign: 'right' }
+        },
+        didDrawPage: (data) => {
+            // --- PDF Footer ---
+            const pageCount = (doc as any).internal.getNumberOfPages ? (doc as any).internal.getNumberOfPages() : 0;
+            doc.setFontSize(8);
+            doc.setTextColor(150);
+            doc.text(`Generado por GestionSystem`, pageMargin, doc.internal.pageSize.height - 10);
+            doc.text(`Página ${data.pageNumber} de ${pageCount}`, doc.internal.pageSize.width - pageMargin, doc.internal.pageSize.height - 10, { align: 'right' });
+        }
+    });
+
+    // --- Totals Section ---
+    const finalY = (doc as any).lastAutoTable.finalY;
+    doc.setDrawColor(200); // Light gray line
+    doc.line(doc.internal.pageSize.width / 2, finalY + 8, doc.internal.pageSize.width - pageMargin, finalY + 8);
+
+    autoTable(doc, {
+        startY: finalY + 10,
+        theme: 'plain',
+        tableWidth: 'wrap',
+        margin: { left: doc.internal.pageSize.width / 2 },
+        body: [
+            ['Subtotal:', { content: formatGuarani(subtotal), styles: { halign: 'right' } }],
+            ['Descuento:', { content: formatGuarani(budget.discount), styles: { halign: 'right' } }],
+            [{
+                content: 'TOTAL:',
+                styles: { fontStyle: 'bold', fontSize: 12 }
+            }, {
+                content: formatGuarani(total),
+                styles: { fontStyle: 'bold', fontSize: 12, halign: 'right' }
+            }],
+        ],
+        styles: { fontSize: 10, cellPadding: { top: 1.5, right: 0, bottom: 1.5, left: 2 } },
+    });
+
+    // --- Notes Section ---
+    const totalsFinalY = (doc as any).lastAutoTable.finalY;
+    if (budget.notes) {
+        doc.setFontSize(9);
+        doc.setTextColor(120);
+        doc.setFont('helvetica', 'italic');
+        doc.text("Notas:", pageMargin, totalsFinalY + 15);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(100);
+        doc.text(doc.splitTextToSize(budget.notes, doc.internal.pageSize.width - (pageMargin * 2)), pageMargin, totalsFinalY + 20);
+    }
+    
+    return doc;
+};
+
+
+// --- COMPONENT DEFINITIONS ---
 
 const Logo: React.FC<{ size?: 'large' | 'small', className?: string }> = ({ size = 'small', className = '' }) => {
     const iconSize = size === 'large' ? 'w-12 h-12' : 'w-9 h-9';
@@ -91,37 +230,26 @@ const AuthScreen: React.FC<{ showAlert: (message: string, type: 'success' | 'err
         setLoading(false);
     };
 
-    // Illustration for the left panel
     const DjIllustration = () => (
       <svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg" className="w-full h-auto">
           <g transform="translate(20, 50) rotate(10 250 250) scale(0.9)">
-              {/* Base */}
               <path d="M100 200 L120 150 L380 150 L400 200 L400 350 L100 350 Z" fill="#374151" />
               <path d="M100 350 L120 300 L380 300 L400 350 Z" fill="#1F2937" />
-              
-              {/* Turntables */}
               <circle cx="180" cy="225" r="50" fill="#111827" />
               <circle cx="180" cy="225" r="45" fill="#4B5563" />
               <circle cx="180"cy="225" r="10" fill="#111827" />
-
               <circle cx="320" cy="225" r="50" fill="#111827" />
               <circle cx="320" cy="225" r="45" fill="#4B5563" />
               <circle cx="320" cy="225" r="10" fill="#111827" />
-              
-              {/* Mixer */}
               <rect x="235" y="260" width="30" height="60" rx="5" fill="#4B5563" />
               <rect x="230" y="270" width="40" height="8" rx="4" fill="#F87171" />
-              
               <rect x="150" y="280" width="20" height="20" rx="3" fill="#D1D5DB" />
               <rect x="180" y="280" width="20" height="20" rx="3" fill="#D1D5DB" />
               <rect x="300" y="280" width="20" height="20" rx="3" fill="#D1D5DB" />
               <rect x="330" y="280" width="20" height="20" rx="3" fill="#D1D5DB" />
-
-              {/* Floating UI elements */}
               <g opacity="0.5">
                   <rect x="50" y="150" width="80" height="40" rx="10" fill="#4F46E5" />
                   <rect x="65" y="165" width="50" height="10" rx="5" fill="#A5B4FC" />
-
                   <rect x="400" y="250" width="60" height="100" rx="10" fill="#EC4899" />
                   <rect x="410" y="260" width="40" height="10" rx="5" fill="#FBCFE8" />
                   <rect x="410" y="280" width="40" height="10" rx="5" fill="#FBCFE8" />
@@ -134,7 +262,6 @@ const AuthScreen: React.FC<{ showAlert: (message: string, type: 'success' | 'err
     return (
         <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900 p-4">
             <div className="flex w-full max-w-4xl lg:max-w-5xl bg-white dark:bg-gray-800 rounded-2xl shadow-2xl overflow-hidden">
-                {/* Left side */}
                 <div className="hidden lg:flex w-1/2 bg-gradient-to-br from-indigo-600 to-blue-800 p-12 flex-col justify-between relative overflow-hidden">
                     <div className="absolute -top-16 -left-16 w-64 h-64 bg-white/10 rounded-full"></div>
                     <div className="absolute -bottom-24 -right-10 w-72 h-72 bg-white/10 rounded-full"></div>
@@ -151,46 +278,22 @@ const AuthScreen: React.FC<{ showAlert: (message: string, type: 'success' | 'err
                         &copy; {new Date().getFullYear()} GestionSystemDj. Todos los derechos reservados.
                     </div>
                 </div>
-
-                {/* Right side - Form */}
                 <div className="w-full lg:w-1/2 p-8 sm:p-12 flex flex-col justify-center">
                     <div className="mb-10">
                         <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-100">Bienvenido/a</h1>
                     </div>
-                    
                     <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Iniciar Sesión</h1>
                     <p className="text-gray-600 dark:text-gray-400 mt-2 mb-8">Ingresa tus credenciales para acceder a tu panel.</p>
-                    
                     <form onSubmit={handleLogin} className="space-y-6">
                         <div>
                             <label className="block text-gray-700 dark:text-gray-300 mb-2 sr-only" htmlFor="login-email">Email</label>
-                            <input 
-                                type="email" 
-                                id="login-email" 
-                                placeholder="Email"
-                                value={email} 
-                                onChange={e => setEmail(e.target.value)} 
-                                className="w-full px-4 py-3 border-gray-200 bg-gray-100 dark:bg-gray-700 dark:border-gray-600 dark:text-white rounded-lg focus:ring-blue-500 focus:border-blue-500 transition" 
-                                required 
-                            />
+                            <input type="email" id="login-email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-4 py-3 border-gray-200 bg-gray-100 dark:bg-gray-700 dark:border-gray-600 dark:text-white rounded-lg focus:ring-blue-500 focus:border-blue-500 transition" required />
                         </div>
                         <div>
                              <label className="block text-gray-700 dark:text-gray-300 mb-2 sr-only" htmlFor="login-password">Contraseña</label>
-                            <input 
-                                type="password" 
-                                id="login-password" 
-                                placeholder="Contraseña"
-                                value={password} 
-                                onChange={e => setPassword(e.target.value)} 
-                                className="w-full px-4 py-3 border-gray-200 bg-gray-100 dark:bg-gray-700 dark:border-gray-600 dark:text-white rounded-lg focus:ring-blue-500 focus:border-blue-500 transition" 
-                                required 
-                            />
+                            <input type="password" id="login-password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="w-full px-4 py-3 border-gray-200 bg-gray-100 dark:bg-gray-700 dark:border-gray-600 dark:text-white rounded-lg focus:ring-blue-500 focus:border-blue-500 transition" required />
                         </div>
-                        <button 
-                            type="submit" 
-                            disabled={loading} 
-                            className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition duration-300 disabled:bg-blue-400 font-semibold !mt-10"
-                        >
+                        <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition duration-300 disabled:bg-blue-400 font-semibold !mt-10">
                             {loading ? 'Cargando...' : 'Iniciar Sesión'}
                         </button>
                     </form>
@@ -199,9 +302,6 @@ const AuthScreen: React.FC<{ showAlert: (message: string, type: 'success' | 'err
         </div>
     );
 };
-
-
-// --- MODAL & UI COMPONENTS ---
 
 const AlertModal: React.FC<{ alertState: AlertState; onClose: () => void; }> = ({ alertState, onClose }) => {
     if (!alertState.isOpen) return null;
@@ -213,10 +313,7 @@ const AlertModal: React.FC<{ alertState: AlertState; onClose: () => void; }> = (
                     {alertState.type === 'success' ? <SuccessIcon /> : <ErrorIcon />}
                 </div>
                 <p className="text-lg mb-6 text-gray-700 dark:text-gray-300">{alertState.message}</p>
-                <button
-                    onClick={onClose}
-                    className="w-full px-4 py-2 rounded bg-primary-600 text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-                >
+                <button onClick={onClose} className="w-full px-4 py-2 rounded bg-primary-600 text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500">
                     Aceptar
                 </button>
             </div>
@@ -597,857 +694,6 @@ const SettingsPage: React.FC<{
     );
 };
 
-// --- PDF Generation Helper ---
-const getBase64ImageFromUrl = (url: string): Promise<string | null> => {
-    return new Promise((resolve) => {
-        const img = new Image();
-        img.crossOrigin = 'Anonymous';
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = img.width;
-            canvas.height = img.height;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) return resolve(null);
-            ctx.drawImage(img, 0, 0);
-            const dataURL = canvas.toDataURL('image/png');
-            resolve(dataURL);
-        };
-        img.onerror = () => resolve(null);
-        img.src = url;
-    });
-};
-
-const generateBudgetPDF = async (budget: Budget, currentUser: User, client: Client | undefined) => {
-    const doc = new jsPDF();
-    const pageMargin = 15;
-    const headStyles = { fillColor: '#2563eb', textColor: '#ffffff', fontStyle: 'bold' as 'bold' };
-
-    // --- PDF Header ---
-    const logoDataUrl = currentUser.companyLogoUrl ? await getBase64ImageFromUrl(currentUser.companyLogoUrl) : null;
-    if (logoDataUrl) {
-        doc.addImage(logoDataUrl, 'PNG', pageMargin, 15, 25, 25);
-    }
-    
-    doc.setFontSize(22);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor('#1d4ed8');
-    doc.text(currentUser.company_name, logoDataUrl ? pageMargin + 30 : pageMargin, 25);
-    
-    doc.setFontSize(11);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100);
-    doc.text(`Presupuesto / Cotización`, logoDataUrl ? pageMargin + 30 : pageMargin, 32);
-
-    // --- Client and Budget Info (using a borderless table for alignment) ---
-    const clientInfo = `CLIENTE:\n${client?.name || 'N/A'}\n${client?.phone || ''}\n${client?.email || ''}`;
-    const budgetInfo = `NÚMERO DE PRESUPUESTO:\nFECHA DE EMISIÓN:\nVÁLIDO HASTA:`;
-    const budgetValues = `${budget.id.substring(0, 8).toUpperCase()}\n${new Date(budget.created_at).toLocaleDateString()}\n${budget.valid_until ? new Date(budget.valid_until).toLocaleDateString() : 'N/A'}`;
-        
-    autoTable(doc, {
-        startY: 50,
-        body: [[
-            { content: clientInfo, styles: { cellPadding: { top: 0, left: 0 } } },
-            { content: budgetInfo, styles: { halign: 'left', cellPadding: { top: 0, left: 0 } } },
-            { content: budgetValues, styles: { halign: 'right', cellPadding: { top: 0, right: 0 }, fontStyle: 'bold' } },
-        ]],
-        theme: 'plain',
-        styles: { fontSize: 9, font: 'helvetica' },
-        columnStyles: {
-            0: { cellWidth: 'auto' },
-            1: { cellWidth: 40 },
-            2: { cellWidth: 'auto' },
-        },
-    });
-
-    // --- Items Table ---
-    const itemsTableStartY = (doc as any).lastAutoTable.finalY + 10;
-    const subtotal = budget.items.reduce((acc, item) => acc + item.quantity * item.price, 0);
-    const total = subtotal - budget.discount;
-    
-    const tableBody = budget.items.map(item => [
-        item.description,
-        item.quantity,
-        formatGuarani(item.price),
-        formatGuarani(item.quantity * item.price)
-    ]);
-
-    autoTable(doc, {
-        startY: itemsTableStartY,
-        head: [['Descripción', 'Cantidad', 'Precio Unit.', 'Total']],
-        body: tableBody,
-        theme: 'grid',
-        headStyles: headStyles,
-        styles: { fontSize: 9, cellPadding: 2, font: 'helvetica' },
-        columnStyles: {
-            1: { halign: 'center' },
-            2: { halign: 'right' },
-            3: { halign: 'right' }
-        },
-        didDrawPage: (data) => {
-            // --- PDF Footer ---
-            const pageCount = (doc as any).internal.getNumberOfPages ? (doc as any).internal.getNumberOfPages() : 0;
-            doc.setFontSize(8);
-            doc.setTextColor(150);
-            doc.text(`Generado por GestionSystem`, pageMargin, doc.internal.pageSize.height - 10);
-            doc.text(`Página ${data.pageNumber} de ${pageCount}`, doc.internal.pageSize.width - pageMargin, doc.internal.pageSize.height - 10, { align: 'right' });
-        }
-    });
-
-    // --- Totals Section ---
-    const finalY = (doc as any).lastAutoTable.finalY;
-    doc.setDrawColor(200); // Light gray line
-    doc.line(doc.internal.pageSize.width / 2, finalY + 8, doc.internal.pageSize.width - pageMargin, finalY + 8);
-
-    autoTable(doc, {
-        startY: finalY + 10,
-        theme: 'plain',
-        tableWidth: 'wrap',
-        margin: { left: doc.internal.pageSize.width / 2 },
-        body: [
-            ['Subtotal:', { content: formatGuarani(subtotal), styles: { halign: 'right' } }],
-            ['Descuento:', { content: formatGuarani(budget.discount), styles: { halign: 'right' } }],
-            [{
-                content: 'TOTAL:',
-                styles: { fontStyle: 'bold', fontSize: 12 }
-            }, {
-                content: formatGuarani(total),
-                styles: { fontStyle: 'bold', fontSize: 12, halign: 'right' }
-            }],
-        ],
-        styles: { fontSize: 10, cellPadding: { top: 1.5, right: 0, bottom: 1.5, left: 2 } },
-    });
-
-    // --- Notes Section ---
-    const totalsFinalY = (doc as any).lastAutoTable.finalY;
-    if (budget.notes) {
-        doc.setFontSize(9);
-        doc.setTextColor(120);
-        doc.setFont('helvetica', 'italic');
-        doc.text("Notas:", pageMargin, totalsFinalY + 15);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(100);
-        doc.text(doc.splitTextToSize(budget.notes, doc.internal.pageSize.width - (pageMargin * 2)), pageMargin, totalsFinalY + 20);
-    }
-    
-    return doc;
-};
-
-// Main App Component
-const App: React.FC = () => {
-    // --- STATE ---
-    const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') as 'light' | 'dark') || 'light');
-    const [session, setSession] = useState<AuthSession | null>(null);
-    const [currentUser, setCurrentUser] = useState<User | null>(null);
-    const [currentPage, setCurrentPage] = useState<Page>('dashboard');
-    const [loading, setLoading] = useState(true);
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-    const [alertState, setAlertState] = useState<AlertState>({ isOpen: false, message: '', type: 'success' });
-    
-    // Admin Features
-    const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-    const [activeAnnouncement, setActiveAnnouncement] = useState<Announcement | null>(null);
-    const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
-    const [adminStats, setAdminStats] = useState<AdminDashboardStats | null>(null);
-    const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
-
-    // Notifications
-    const [notifications, setNotifications] = useState<Notification[]>([]);
-    const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-
-    // User Data
-    const [users, setUsers] = useState<User[]>([]); 
-    const [events, setEvents] = useState<Event[]>([]); 
-    const [clients, setClients] = useState<Client[]>([]);
-    const [budgets, setBudgets] = useState<Budget[]>([]);
-    const [inquiries, setInquiries] = useState<Inquiry[]>([]);
-
-    // Chat
-    const [chatUsers, setChatUsers] = useState<ChatUser[]>([]);
-    const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-    const [chatError, setChatError] = useState<string | null>(null);
-
-
-    // State for budget modal to enable cross-component actions
-    const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
-    const [selectedBudget, setSelectedBudget] = useState<Budget | null>(null);
-
-    // AI State
-    const [aiSuggestion, setAiSuggestion] = useState<{ title: string; suggestion: string; isLoading: boolean } | null>(null);
-    
-    // --- ROUTING ---
-    const getPathFromHash = () => window.location.hash.substring(1); 
-    const [path, setPath] = useState(getPathFromHash());
-
-    useEffect(() => {
-        const onHashChange = () => setPath(getPathFromHash());
-        window.addEventListener('hashchange', onHashChange);
-        return () => window.removeEventListener('hashchange', onHashChange);
-    }, []);
-    
-    // --- FUNCTIONS ---
-    const showAlert = (message: string, type: 'success' | 'error' = 'error') => {
-        setAlertState({ isOpen: true, message, type });
-    };
-
-    useEffect(() => {
-        if (theme === 'dark') document.documentElement.classList.add('dark');
-        else document.documentElement.classList.remove('dark');
-        localStorage.setItem('theme', theme);
-    }, [theme]);
-
-    const fetchUserProfile = useCallback(async (userId: string) => {
-        const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-        if (error) {
-            console.error('Error fetching user profile:', error);
-            if (error.code !== 'PGRST116') {
-                 showAlert(`Error al cargar tu perfil: ${error.message}`, 'error');
-                 await supabase.auth.signOut();
-            }
-            return null;
-        }
-        
-        let profileData = data as any;
-        const expiryDate = new Date(profileData.active_until);
-        const today = new Date();
-        today.setHours(0,0,0,0); // Compare against start of today
-
-        if (expiryDate < today && profileData.status === 'active') {
-            const { error: updateError } = await supabase
-                .from('profiles')
-                .update({ status: 'inactive' })
-                .eq('id', userId);
-            
-            if (updateError) {
-                console.error("Error auto-updating user status to inactive:", updateError);
-            } else {
-                console.log(`User ${userId} automatically set to inactive.`);
-                profileData.status = 'inactive';
-            }
-        }
-        
-        const { data: { user } } = await supabase.auth.getUser();
-        
-        return { 
-            ...profileData, 
-            activeUntil: profileData.active_until,
-            company_name: profileData.company_name,
-            companyLogoUrl: profileData.company_logo_url,
-            email: user?.email 
-        } as User;
-    }, []);
-    
-    useEffect(() => {
-        const processSession = (session: AuthSession | null) => {
-            setSession(session);
-            if (session?.user) {
-                fetchUserProfile(session.user.id).then(profile => {
-                    if (profile && profile.status === 'inactive') {
-                        showAlert('Tu cuenta está inactiva. Por favor, contacta al administrador.', 'error');
-                        supabase.auth.signOut();
-                        setCurrentUser(null);
-                    } else {
-                        setCurrentUser(profile);
-                    }
-                    setLoading(false);
-                });
-            } else {
-                setCurrentUser(null);
-                setLoading(false);
-            }
-        };
-
-        setLoading(true);
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            processSession(session);
-        });
-
-        const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-            processSession(session);
-        });
-
-        return () => authListener.subscription.unsubscribe();
-    }, [fetchUserProfile]);
-
-
-    const fetchAdminData = useCallback(async () => {
-        const { data: stats, error: statsError } = await supabase.rpc('get_admin_dashboard_stats');
-        if (statsError) {
-            showAlert(`Error al cargar estadísticas del dashboard: ${statsError.message}`, 'error');
-            return;
-        }
-        setAdminStats(stats as AdminDashboardStats);
-       
-        const { data: usersData, error: usersError } = await supabase.rpc('get_all_users_with_details');
-        if (usersError) {
-            showAlert(`Error al cargar la lista de usuarios: ${usersError.message}`, 'error');
-            return;
-        }
-        setUsers(usersData as User[]);
-
-        const { data: announcementsData, error: announcementsError } = await supabase.from('announcements').select('*').order('created_at', { ascending: false });
-        if(announcementsError) showAlert('Error al cargar anuncios: ' + announcementsError.message, 'error');
-        else setAnnouncements(announcementsData as Announcement[] || []);
-        
-        const { data: logsData, error: logsError } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(100);
-        if(logsError) showAlert('Error al cargar registro de actividad: ' + logsError.message, 'error');
-        else setActivityLogs(logsData as ActivityLog[]);
-        
-    }, []);
-
-    const fetchClients = useCallback(async (userId: string) => {
-        const { data, error } = await supabase.from('clients').select('*').eq('user_id', userId).order('name', { ascending: true });
-        if (error) showAlert("Error al cargar los clientes: " + error.message, 'error');
-        else setClients(data as Client[] || []);
-    }, []);
-
-    const fetchBudgets = useCallback(async (userId: string) => {
-        const { data, error } = await supabase.from('budgets').select('*, client:clients(*)').eq('user_id', userId).order('created_at', { ascending: false });
-        if (error) showAlert("Error al cargar los presupuestos: " + error.message, 'error');
-        else setBudgets(data as Budget[] || []);
-    }, []);
-    
-    const fetchInquiries = useCallback(async (userId: string) => {
-        const { data, error } = await supabase.from('inquiries').select('*').eq('user_id', userId).order('created_at', { ascending: false });
-        if (error) showAlert("Error al cargar las consultas: " + error.message, 'error');
-        else setInquiries(data as Inquiry[] || []);
-    }, []);
-
-    const fetchUserData = useCallback(async (userId: string) => {
-        // Events
-        const { data: eventsData, error: eventsError } = await supabase.from('events').select('*, client:clients(*)').eq('user_id', userId).order('date', { ascending: false });
-        if (eventsError) showAlert("Error al cargar los eventos: " + eventsError.message, 'error');
-        else setEvents(eventsData as Event[] || []);
-        
-        // Active Announcement
-        const { data: announcementData, error: announcementError } = await supabase.from('announcements').select('*').eq('is_active', true).limit(1).single();
-        if(announcementData && !announcementError) {
-             const announcementId = announcementData.id;
-             const hasSeen = sessionStorage.getItem(`seen_announcement_${announcementId}`);
-             if (!hasSeen) {
-                 setActiveAnnouncement(announcementData as Announcement);
-                 setIsAnnouncementModalOpen(true);
-                 sessionStorage.setItem(`seen_announcement_${announcementId}`, 'true');
-             }
-        }
-        
-        // Notifications
-        const { data: notificationsData, error: notificationsError } = await supabase.from('notifications').select('*').eq('user_id', userId).order('created_at', { ascending: false });
-        if(notificationsError) showAlert("Error al cargar notificaciones: " + notificationsError.message, 'error');
-        else setNotifications(notificationsData as Notification[] || []);
-
-    }, []);
-
-    useEffect(() => {
-        if (!currentUser) return;
-        const fetchData = async () => {
-            setLoading(true);
-            if (currentUser.role === 'admin') await fetchAdminData();
-            else {
-                await fetchUserData(currentUser.id);
-                await fetchClients(currentUser.id);
-                await fetchBudgets(currentUser.id);
-                await fetchInquiries(currentUser.id);
-            }
-            setLoading(false);
-        };
-        fetchData();
-    }, [currentUser, fetchAdminData, fetchUserData, fetchClients, fetchBudgets, fetchInquiries]);
-
-     // --- CHAT REALTIME ---
-    const fetchChatUsers = useCallback(async () => {
-        setChatError(null);
-        try {
-            const { data, error } = await supabase.rpc('get_chat_users_with_details');
-            if (error) throw error;
-            setChatUsers((data as ChatUser[]) || []);
-        } catch (error: any) {
-            console.error("Error fetching chat users", error);
-            if (error.message.includes("404")) { // Simple check for "Not Found" which implies missing function
-                 setChatError("La función de chat no está configurada en la base de datos.");
-            } else {
-                 setChatError("Error al cargar usuarios del chat.");
-            }
-        }
-    }, []);
-
-    useEffect(() => {
-        if (!currentUser) return;
-
-        const fetchInitialMessages = async () => {
-             setChatError(null);
-             try {
-                 if (currentUser.role === 'admin') {
-                    await fetchChatUsers();
-                    const { data: allMessages, error } = await supabase.from('chat_messages').select('*').order('created_at');
-                    if (error) throw error;
-                    setChatMessages((allMessages as ChatMessage[]) || []);
-                 } else {
-                    const { data, error } = await supabase.from('chat_messages').select('*').eq('user_id', currentUser.id).order('created_at');
-                    if (error) throw error;
-                    setChatMessages((data as ChatMessage[]) || []);
-                 }
-            } catch (error: any) {
-                console.error("Error fetching messages", error);
-                if (error.message.includes("does not exist")) { // More specific check for missing table
-                    setChatError("La tabla de chat no está configurada en la base de datos.");
-                } else {
-                    setChatError("Error al cargar los mensajes.");
-                }
-            }
-        }
-        fetchInitialMessages();
-
-        const channel = supabase.channel('chat-messages-realtime')
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' },
-                async (payload) => {
-                    const newMessage = payload.new as ChatMessage;
-                    if (currentUser.role === 'admin') {
-                        setChatMessages(prev => [...prev, newMessage]);
-                        await fetchChatUsers(); // Refresh user list with unread counts
-                    } else if (newMessage.user_id === currentUser.id) {
-                         setChatMessages(prev => [...prev, newMessage]);
-                    }
-                }
-            )
-            .subscribe();
-        
-        return () => {
-            supabase.removeChannel(channel);
-        };
-    }, [currentUser, fetchChatUsers]);
-
-
-    const handleLogout = async () => {
-        sessionStorage.clear(); // Clear session storage on logout
-        await supabase.auth.signOut();
-        setCurrentPage('dashboard');
-    };
-    
-    const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
-    
-    const saveEvent = async (event: Event) => {
-        const isNew = !event.id;
-        
-        const payload: any = {
-            user_id: currentUser!.id,
-            client_id: event.client_id,
-            name: event.name,
-            location: event.location,
-            date: event.date,
-            amount_charged: event.amount_charged,
-            expenses: event.expenses.map(({ id: expenseId, ...rest }) => rest),
-            observations: event.observations,
-        };
-        
-        if (!isNew) {
-            payload.id = event.id;
-        }
-
-        const { error } = await supabase.from('events').upsert(payload);
-
-        if (error) {
-            showAlert('Error al guardar el evento: ' + error.message, 'error');
-        } else {
-            showAlert('Evento guardado exitosamente.', 'success');
-            await logActivity(isNew ? 'event_created' : 'event_updated', { eventName: event.name });
-            if (isNew) {
-                const eventClient = clients.find(c => c.id === event.client_id);
-                if (eventClient && eventClient.email) {
-                    await supabase.functions.invoke('send-event-confirmation', {
-                        body: {
-                            clientEmail: eventClient.email,
-                            clientName: eventClient.name,
-                            eventName: event.name,
-                            eventDate: event.date,
-                            eventLocation: event.location,
-                            companyName: currentUser!.company_name,
-                        }
-                    });
-                }
-            }
-            await fetchUserData(currentUser!.id);
-        }
-    };
-
-    const deleteEvent = async (eventId: string) => {
-        if (window.confirm('¿Estás seguro de que quieres eliminar este evento?')) {
-            const eventToDelete = events.find(e => e.id === eventId);
-            const { error } = await supabase.from('events').delete().eq('id', eventId);
-            if (error) showAlert('Error al eliminar el evento: ' + error.message, 'error');
-            else {
-                showAlert('Evento eliminado.', 'success');
-                await logActivity('event_deleted', { eventName: eventToDelete?.name || 'Desconocido' });
-                await fetchUserData(currentUser!.id);
-            }
-        }
-    };
-
-    const saveClient = async (client: Client): Promise<Client | null> => {
-        const isNew = !client.id;
-        
-        const payload: any = {
-            user_id: currentUser!.id,
-            name: client.name,
-            phone: client.phone,
-            email: client.email,
-        };
-        
-        if (!isNew) {
-            payload.id = client.id;
-        }
-        
-        const { data, error } = await supabase.from('clients').upsert(payload).select().single();
-
-        if (error) {
-            showAlert('Error al guardar el cliente: ' + error.message, 'error');
-            return null;
-        } else {
-            showAlert('Cliente guardado exitosamente.', 'success');
-            await logActivity(isNew ? 'client_created' : 'client_updated', { clientName: client.name });
-            if (isNew && client.email) {
-                 await supabase.functions.invoke('send-welcome-email', {
-                    body: { email: client.email, name: client.name, djCompanyName: currentUser!.company_name },
-                });
-            }
-            await fetchClients(currentUser!.id);
-            return data as Client;
-        }
-    };
-    
-    const deleteClient = async (clientId: string) => {
-        if (window.confirm('¿Estás seguro de que quieres eliminar este cliente? Esto no eliminará sus eventos asociados.')) {
-            const clientToDelete = clients.find(c => c.id === clientId);
-            const { error } = await supabase.from('clients').delete().eq('id', clientId);
-            if (error) showAlert('Error al eliminar el cliente: ' + error.message, 'error');
-            else {
-                showAlert('Cliente eliminado.', 'success');
-                await logActivity('client_deleted', { clientName: clientToDelete?.name || 'Desconocido' });
-                await fetchClients(currentUser!.id);
-            }
-        }
-    };
-
-    const saveUser = async (user: User, password?: string) => {
-        const isNewUser = !user.id;
-        const { id, role, status, activeUntil, company_name, companyLogoUrl, notification_email } = user;
-
-        if (isNewUser) {
-             if (!user.email || !password) {
-                showAlert("Email y contraseña son requeridos para crear un usuario.", 'error');
-                return;
-            }
-            const { error } = await supabase.functions.invoke('create-user', {
-                body: { email: user.email, password, companyName: company_name, activeUntil },
-            });
-            if (error) showAlert("Error al crear usuario: " + error.message, 'error');
-            else {
-                showAlert("Usuario creado exitosamente.", 'success');
-                await logActivity('admin_user_created', { userEmail: user.email });
-                await fetchAdminData();
-            }
-        } else {
-            const updateData: any = { role, status, active_until: activeUntil, company_name, company_logo_url: companyLogoUrl };
-            if (currentUser?.role === 'admin') {
-                updateData.notification_email = notification_email;
-            }
-            const { error } = await supabase.from('profiles').update(updateData).eq('id', id);
-
-            if (error) showAlert("Error actualizando perfil: " + error.message, 'error');
-            else {
-                await fetchAdminData();
-                if (currentUser?.id === user.id) setCurrentUser(await fetchUserProfile(user.id));
-                showAlert("Perfil actualizado exitosamente.", 'success');
-                await logActivity('admin_user_updated', { userEmail: user.email });
-            }
-        }
-    };
-    
-    const uploadFile = async (bucket: string, path: string, file: File) => {
-         const { error } = await supabase.storage.from(bucket).upload(path, file, { upsert: true });
-        if (error) {
-            showAlert(`Error al subir archivo: ${error.message}`, 'error');
-            return null;
-        }
-        const { data } = supabase.storage.from(bucket).getPublicUrl(path);
-        return `${data.publicUrl}?t=${new Date().getTime()}`;
-    }
-
-    const uploadLogo = (userId: string, file: File) => uploadFile('logos', `${userId}/logo.${file.name.split('.').pop()}`, file);
-
-    const saveAnnouncement = async (announcement: Announcement, imageFile?: File | null) => {
-        let imageUrl = announcement.image_url;
-        if(imageFile) {
-            const newImageUrl = await uploadFile('announcements', `image_${Date.now()}.${imageFile.name.split('.').pop()}`, imageFile);
-            if(!newImageUrl) return; // Stop if upload fails
-            imageUrl = newImageUrl;
-        }
-        
-        const payload = {
-            title: announcement.title,
-            content: announcement.content,
-            image_url: imageUrl,
-            is_active: announcement.is_active,
-            created_by: currentUser!.id
-        };
-        
-        const upsertData = announcement.id ? { ...payload, id: announcement.id } : payload;
-
-        const { error } = await supabase.from('announcements').upsert(upsertData);
-        if(error) showAlert('Error guardando anuncio: ' + error.message, 'error');
-        else {
-            showAlert('Anuncio guardado exitosamente.', 'success');
-            await logActivity('admin_announcement_saved', { title: announcement.title });
-            await fetchAdminData();
-        }
-    };
-
-    const deleteAnnouncement = async (id: string) => {
-        if(window.confirm('¿Estás seguro de que quieres eliminar este anuncio?')) {
-            const announcementToDelete = announcements.find(a => a.id === id);
-            const { error } = await supabase.from('announcements').delete().eq('id', id);
-            if(error) showAlert('Error eliminando anuncio: ' + error.message, 'error');
-            else {
-                showAlert('Anuncio eliminado.', 'success');
-                await logActivity('admin_announcement_deleted', { title: announcementToDelete?.title || 'Desconocido' });
-                await fetchAdminData();
-            }
-        }
-    };
-    
-    const toggleAnnouncementActive = async (announcement: Announcement) => {
-        // Deactivate all other announcements first
-        const { error: deactivateError } = await supabase.from('announcements').update({ is_active: false }).neq('id', announcement.id);
-        if(deactivateError) {
-             showAlert('Error al actualizar anuncios: ' + deactivateError.message, 'error');
-             return;
-        }
-        
-        // Activate the selected one
-        const { error: activateError } = await supabase.from('announcements').update({ is_active: !announcement.is_active }).eq('id', announcement.id);
-        if(activateError) showAlert('Error al activar anuncio: ' + activateError.message, 'error');
-        else await fetchAdminData();
-    };
-    
-    const sendNotificationToAll = async (message: string) => {
-        if(!message.trim()) {
-            showAlert('El mensaje no puede estar vacío.', 'error');
-            return;
-        }
-        const { error } = await supabase.functions.invoke('send-notification', { body: { message } });
-        if(error) showAlert('Error al enviar notificación: ' + error.message, 'error');
-        else {
-            showAlert('Notificación enviada a todos los usuarios.', 'success');
-            await logActivity('admin_mass_notification_sent');
-        }
-    };
-
-    const markNotificationsAsRead = async () => {
-        const unreadIds = notifications.filter(n => !n.is_read).map(n => n.id);
-        if (unreadIds.length === 0) return;
-        
-        const { error } = await supabase.from('notifications').update({ is_read: true }).in('id', unreadIds);
-        if(error) console.error("Error marking notifications as read:", error);
-        else {
-            const updatedNotifications = notifications.map(n => ({...n, is_read: true}));
-            setNotifications(updatedNotifications);
-        }
-    };
-
-    const daysUntilExpiry = useMemo(() => {
-        if (!currentUser?.activeUntil) return null;
-        const expiryDate = new Date(currentUser.activeUntil);
-        const today = new Date();
-        const diffTime = expiryDate.getTime() - today.getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        return diffDays;
-    }, [currentUser]);
-    
-    const saveBudget = async (budget: Budget) => {
-        const isNew = !budget.id;
-        
-        const payload: any = {
-            user_id: currentUser!.id,
-            client_id: budget.client_id,
-            title: budget.title,
-            status: budget.status,
-            items: budget.items.map(({ id: itemId, ...rest }) => rest),
-            discount: budget.discount,
-            notes: budget.notes,
-            valid_until: budget.valid_until,
-        };
-
-        if (!isNew) {
-            payload.id = budget.id;
-        }
-        
-        const { error } = await supabase.from('budgets').upsert(payload);
-
-        if (error) {
-            showAlert('Error al guardar el presupuesto: ' + error.message, 'error');
-        } else {
-            showAlert('Presupuesto guardado exitosamente.', 'success');
-            await logActivity(isNew ? 'budget_created' : 'budget_updated', { title: budget.title });
-            await fetchBudgets(currentUser!.id);
-        }
-    };
-
-    const deleteBudget = async (budgetId: string) => {
-        if (window.confirm('¿Estás seguro de que quieres eliminar este presupuesto?')) {
-            const budgetToDelete = budgets.find(b => b.id === budgetId);
-            const { error } = await supabase.from('budgets').delete().eq('id', budgetId);
-            if (error) showAlert('Error al eliminar el presupuesto: ' + error.message, 'error');
-            else {
-                showAlert('Presupuesto eliminado.', 'success');
-                await logActivity('budget_deleted', { title: budgetToDelete?.title || 'Desconocido' });
-                await fetchBudgets(currentUser!.id);
-            }
-        }
-    };
-    
-    const convertInquiryToBudget = async (inquiry: Inquiry) => {
-        let client = clients.find(c => c.email && c.email === inquiry.client_email && inquiry.client_email !== '');
-        
-        if (!client) {
-            const newClient = await saveClient({
-                id: '',
-                user_id: currentUser!.id,
-                name: inquiry.client_name,
-                phone: inquiry.client_phone || '',
-                email: inquiry.client_email || ''
-            });
-            if (!newClient) {
-                showAlert("No se pudo crear el cliente desde la consulta.", "error");
-                return;
-            }
-            client = newClient;
-        }
-
-        const newBudget: Budget = {
-            id: '', 
-            user_id: currentUser!.id,
-            client_id: client.id,
-            title: inquiry.event_type || `Presupuesto para ${client.name}`,
-            status: 'Borrador',
-            items: [{ id: Math.random().toString(), description: inquiry.event_type || 'Servicio de DJ', quantity: 1, price: 0 }],
-            discount: 0,
-            notes: inquiry.message || '',
-            created_at: new Date().toISOString()
-        };
-        
-        setSelectedBudget(newBudget);
-        setIsBudgetModalOpen(true);
-        setCurrentPage('budgets');
-    };
-
-    // --- AI HANDLERS ---
-    const handleGetInquirySuggestion = async (inquiry: Inquiry) => {
-        setAiSuggestion({ title: 'Sugerencia de Respuesta', suggestion: '', isLoading: true });
-        const suggestion = await getInquiryReplySuggestion(inquiry.message || 'El cliente no dejó un mensaje detallado.');
-        setAiSuggestion(prev => ({ ...prev!, suggestion, isLoading: false }));
-    };
-
-    const handleGetFollowUpSuggestion = async (budget: Budget) => {
-        setAiSuggestion({ title: 'Sugerencia de Seguimiento', suggestion: '', isLoading: true });
-        const clientName = clients.find(c => c.id === budget.client_id)?.name || 'Cliente';
-        const suggestion = await getFollowUpEmailSuggestion(clientName, budget.title);
-        setAiSuggestion(prev => ({ ...prev!, suggestion, isLoading: false }));
-    };
-
-
-    if (loading) {
-        return <div className="h-screen w-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200">Cargando...</div>;
-    }
-
-    if (path.startsWith('/inquiry/')) {
-        const userId = path.split('/')[2];
-        if (userId) {
-            return <PublicInquiryPage userId={userId} />;
-        }
-    }
-    
-    return (
-        <>
-            {session && currentUser ? (
-                <div className="relative md:flex h-screen bg-gray-100 dark:bg-slate-900 text-gray-900 dark:text-gray-100 overflow-hidden">
-                    {isSidebarOpen && <div className="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden" onClick={() => setIsSidebarOpen(false)}></div>}
-                    <Sidebar
-                        currentPage={currentPage}
-                        setCurrentPage={setCurrentPage}
-                        currentUser={currentUser}
-                        handleLogout={handleLogout}
-                        isOpen={isSidebarOpen}
-                        setIsOpen={setIsSidebarOpen}
-                    />
-                    <main className="flex-1 p-4 md:p-6 overflow-y-auto">
-                        <Header
-                            currentUser={currentUser}
-                            toggleTheme={toggleTheme}
-                            theme={theme}
-                            onMenuClick={() => setIsSidebarOpen(true)}
-                            notifications={notifications}
-                            isNotificationsOpen={isNotificationsOpen}
-                            setIsNotificationsOpen={setIsNotificationsOpen}
-                            markNotificationsAsRead={markNotificationsAsRead}
-                            daysUntilExpiry={daysUntilExpiry}
-                        />
-                        <PageContent
-                            currentPage={currentPage}
-                            setCurrentPage={setCurrentPage}
-                            currentUser={currentUser}
-                            events={events}
-                            clients={clients}
-                            budgets={budgets}
-                            inquiries={inquiries}
-                            saveEvent={saveEvent}
-                            deleteEvent={deleteEvent}
-                            saveClient={saveClient}
-                            deleteClient={deleteClient}
-                            saveBudget={saveBudget}
-                            deleteBudget={deleteBudget}
-                            users={users}
-                            saveUser={saveUser}
-                            uploadLogo={uploadLogo}
-                            showAlert={showAlert}
-                            announcements={announcements}
-                            saveAnnouncement={saveAnnouncement}
-                            deleteAnnouncement={deleteAnnouncement}
-                            toggleAnnouncementActive={toggleAnnouncementActive}
-                            sendNotificationToAll={sendNotificationToAll}
-                            fetchInquiries={fetchInquiries}
-                            convertInquiryToBudget={convertInquiryToBudget}
-                            isBudgetModalOpen={isBudgetModalOpen}
-                            setIsBudgetModalOpen={setIsBudgetModalOpen}
-                            selectedBudget={selectedBudget}
-                            setSelectedBudget={setSelectedBudget}
-                            adminStats={adminStats}
-                            activityLogs={activityLogs}
-                            fetchAdminData={fetchAdminData}
-                            handleGetInquirySuggestion={handleGetInquirySuggestion}
-                            handleGetFollowUpSuggestion={handleGetFollowUpSuggestion}
-                            chatUsers={chatUsers}
-                            chatMessages={chatMessages}
-                            fetchChatUsers={fetchChatUsers}
-                            chatError={chatError}
-                        />
-                    </main>
-                    {isAnnouncementModalOpen && activeAnnouncement && (
-                        <AnnouncementModal 
-                            announcement={activeAnnouncement} 
-                            onClose={() => setIsAnnouncementModalOpen(false)} 
-                        />
-                    )}
-                </div>
-            ) : (
-                <AuthScreen showAlert={showAlert} />
-            )}
-            <AlertModal alertState={alertState} onClose={() => setAlertState({ ...alertState, isOpen: false })} />
-            {aiSuggestion && <AiSuggestionModal {...aiSuggestion} onClose={() => setAiSuggestion(null)} />}
-        </>
-    );
-};
-
-
-
 const PageContent: React.FC<{
     currentPage: Page;
     setCurrentPage: (page: Page) => void;
@@ -1619,7 +865,6 @@ const ActivityLogPage: React.FC<{logs: ActivityLog[]}> = ({ logs }) => {
         </div>
     );
 };
-
 
 const DashboardUser: React.FC<{events: Event[]}> = ({events}) => {
     const [insights, setInsights] = useState<string>("Generando percepciones...");
@@ -1813,6 +1058,7 @@ const UserManagementPage: React.FC<{users: User[], saveUser: (user: User, passwo
         </div>
     );
 };
+
 const UserFormModal: React.FC<{user: User | null, onSave: (user: User, password?: string) => void, onClose: () => void }> = ({ user, onSave, onClose }) => {
     const isNewUser = !user?.id;
     const [formData, setFormData] = useState<User>(user || { id: '', email: '', role: 'user', status: 'active', activeUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], company_name: '' });
@@ -1900,6 +1146,7 @@ const EventsPage: React.FC<{events: Event[], clients: Client[], saveEvent: (even
         </div>
     );
 };
+
 const EventFormModal: React.FC<{event: Event | null, clients: Client[], onSave: (event: Event) => void, onClose: () => void}> = ({ event, clients, onSave, onClose }) => {
     const isNew = !event?.id;
     const initialEventState = useMemo(() => {
@@ -1985,6 +1232,7 @@ const EventFormModal: React.FC<{event: Event | null, clients: Client[], onSave: 
         </div>
     );
 };
+
 const ClientsPage: React.FC<{ clients: Client[], saveClient: (client: Client) => Promise<Client | null>, deleteClient: (id: string) => Promise<void>}> = ({ clients, saveClient, deleteClient }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -2031,6 +1279,7 @@ const ClientsPage: React.FC<{ clients: Client[], saveClient: (client: Client) =>
         </div>
     );
 };
+
 const ClientFormModal: React.FC<{client: Client | null, onSave: (client: Client) => void, onClose: () => void,}> = ({ client, onSave, onClose }) => {
     const isNew = !client?.id;
     const [formData, setFormData] = useState<Client>(client || { id: '', user_id: '', name: '', phone: '', email: '' });
@@ -2055,6 +1304,7 @@ const ClientFormModal: React.FC<{client: Client | null, onSave: (client: Client)
         </div>
     );
 };
+
 const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events, currentUser }) => {
     const today = new Date().toISOString().split('T')[0];
     const [startDate, setStartDate] = useState(today);
@@ -2204,8 +1454,6 @@ const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events,
     );
 };
 
-// --- NEW ADMIN COMPONENTS ---
-
 const AnnouncementsPage: React.FC<{
     announcements: Announcement[],
     saveAnnouncement: (announcement: Announcement, imageFile?: File | null) => Promise<void>,
@@ -2322,9 +1570,6 @@ const SendNotificationPage: React.FC<{ sendNotificationToAll: (message: string) 
     );
 };
 
-
-// --- NEW USER COMPONENT ---
-
 const AnnouncementModal: React.FC<{
     announcement: Announcement,
     onClose: () => void
@@ -2350,8 +1595,6 @@ const AnnouncementModal: React.FC<{
         </div>
     )
 }
-
-// --- NEW BUDGET COMPONENTS ---
 
 const BudgetsPage: React.FC<{
     budgets: Budget[];
@@ -2669,8 +1912,6 @@ const EmailBudgetModal: React.FC<{
     );
 }
 
-// ---- NEW INQUIRY COMPONENTS ----
-
 const InquiriesPage: React.FC<{
     inquiries: Inquiry[];
     fetchInquiries: () => Promise<void>;
@@ -2840,7 +2081,6 @@ const PublicInquiryPage: React.FC<{ userId: string }> = ({ userId }) => {
     );
 };
 
-// --- NEW COACH AND CHAT COMPONENTS ---
 const CoachPage: React.FC = () => {
     const [messages, setMessages] = useState<{ role: 'user' | 'model', text: string }[]>([]);
     const [currentInput, setCurrentInput] = useState('');
@@ -3099,7 +2339,6 @@ const ChatWindow: React.FC<{
     );
 };
 
-// --- NEW DB SETUP PAGE FOR ADMIN ---
 const DatabaseSetupPage: React.FC = () => {
     
     const CodeBlock: React.FC<{ title: string; sql: string }> = ({ title, sql }) => {
@@ -3319,5 +2558,710 @@ serve(async (req) => {
     );
 };
 
+
+// --- MAIN APP COMPONENT ---
+const App: React.FC = () => {
+    // --- STATE ---
+    const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') as 'light' | 'dark') || 'light');
+    const [session, setSession] = useState<AuthSession | null>(null);
+    const [currentUser, setCurrentUser] = useState<User | null>(null);
+    const [currentPage, setCurrentPage] = useState<Page>('dashboard');
+    const [loading, setLoading] = useState(true);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [alertState, setAlertState] = useState<AlertState>({ isOpen: false, message: '', type: 'success' });
+    
+    // Admin Features
+    const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+    const [activeAnnouncement, setActiveAnnouncement] = useState<Announcement | null>(null);
+    const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
+    const [adminStats, setAdminStats] = useState<AdminDashboardStats | null>(null);
+    const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
+
+    // Notifications
+    const [notifications, setNotifications] = useState<Notification[]>([]);
+    const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+
+    // User Data
+    const [users, setUsers] = useState<User[]>([]); 
+    const [events, setEvents] = useState<Event[]>([]); 
+    const [clients, setClients] = useState<Client[]>([]);
+    const [budgets, setBudgets] = useState<Budget[]>([]);
+    const [inquiries, setInquiries] = useState<Inquiry[]>([]);
+
+    // Chat
+    const [chatUsers, setChatUsers] = useState<ChatUser[]>([]);
+    const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+    const [chatError, setChatError] = useState<string | null>(null);
+
+
+    // State for budget modal to enable cross-component actions
+    const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
+    const [selectedBudget, setSelectedBudget] = useState<Budget | null>(null);
+
+    // AI State
+    const [aiSuggestion, setAiSuggestion] = useState<{ title: string; suggestion: string; isLoading: boolean } | null>(null);
+    
+    // --- ROUTING ---
+    const getPathFromHash = () => window.location.hash.substring(1); 
+    const [path, setPath] = useState(getPathFromHash());
+
+    useEffect(() => {
+        const onHashChange = () => setPath(getPathFromHash());
+        window.addEventListener('hashchange', onHashChange);
+        return () => window.removeEventListener('hashchange', onHashChange);
+    }, []);
+    
+    // --- FUNCTIONS ---
+    const showAlert = (message: string, type: 'success' | 'error' = 'error') => {
+        setAlertState({ isOpen: true, message, type });
+    };
+
+    useEffect(() => {
+        if (theme === 'dark') document.documentElement.classList.add('dark');
+        else document.documentElement.classList.remove('dark');
+        localStorage.setItem('theme', theme);
+    }, [theme]);
+
+    const fetchUserProfile = useCallback(async (userId: string) => {
+        const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+        if (error) {
+            console.error('Error fetching user profile:', error);
+            if (error.code !== 'PGRST116') {
+                 showAlert(`Error al cargar tu perfil: ${error.message}`, 'error');
+                 await supabase.auth.signOut();
+            }
+            return null;
+        }
+        
+        let profileData = data as any;
+        const expiryDate = new Date(profileData.active_until);
+        const today = new Date();
+        today.setHours(0,0,0,0); // Compare against start of today
+
+        if (expiryDate < today && profileData.status === 'active') {
+            const { error: updateError } = await supabase
+                .from('profiles')
+                .update({ status: 'inactive' })
+                .eq('id', userId);
+            
+            if (updateError) {
+                console.error("Error auto-updating user status to inactive:", updateError);
+            } else {
+                console.log(`User ${userId} automatically set to inactive.`);
+                profileData.status = 'inactive';
+            }
+        }
+        
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        return { 
+            ...profileData, 
+            activeUntil: profileData.active_until,
+            company_name: profileData.company_name,
+            companyLogoUrl: profileData.company_logo_url,
+            email: user?.email 
+        } as User;
+    }, []);
+    
+    useEffect(() => {
+        const processSession = (session: AuthSession | null) => {
+            setSession(session);
+            if (session?.user) {
+                fetchUserProfile(session.user.id).then(profile => {
+                    if (profile && profile.status === 'inactive') {
+                        showAlert('Tu cuenta está inactiva. Por favor, contacta al administrador.', 'error');
+                        supabase.auth.signOut();
+                        setCurrentUser(null);
+                    } else {
+                        setCurrentUser(profile);
+                    }
+                    setLoading(false);
+                });
+            } else {
+                setCurrentUser(null);
+                setLoading(false);
+            }
+        };
+
+        setLoading(true);
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            processSession(session);
+        });
+
+        const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+            processSession(session);
+        });
+
+        return () => authListener.subscription.unsubscribe();
+    }, [fetchUserProfile]);
+
+
+    const fetchAdminData = useCallback(async () => {
+        const { data: stats, error: statsError } = await supabase.rpc('get_admin_dashboard_stats');
+        if (statsError) {
+            showAlert(`Error al cargar estadísticas del dashboard: ${statsError.message}`, 'error');
+            return;
+        }
+        setAdminStats(stats as AdminDashboardStats);
+       
+        const { data: usersData, error: usersError } = await supabase.rpc('get_all_users_with_details');
+        if (usersError) {
+            showAlert(`Error al cargar la lista de usuarios: ${usersError.message}`, 'error');
+            return;
+        }
+        setUsers(usersData as User[]);
+
+        const { data: announcementsData, error: announcementsError } = await supabase.from('announcements').select('*').order('created_at', { ascending: false });
+        if(announcementsError) showAlert('Error al cargar anuncios: ' + announcementsError.message, 'error');
+        else setAnnouncements(announcementsData as Announcement[] || []);
+        
+        const { data: logsData, error: logsError } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(100);
+        if(logsError) showAlert('Error al cargar registro de actividad: ' + logsError.message, 'error');
+        else setActivityLogs(logsData as ActivityLog[]);
+        
+    }, []);
+
+    const fetchClients = useCallback(async (userId: string) => {
+        const { data, error } = await supabase.from('clients').select('*').eq('user_id', userId).order('name', { ascending: true });
+        if (error) showAlert("Error al cargar los clientes: " + error.message, 'error');
+        else setClients(data as Client[] || []);
+    }, []);
+
+    const fetchBudgets = useCallback(async (userId: string) => {
+        const { data, error } = await supabase.from('budgets').select('*, client:clients(*)').eq('user_id', userId).order('created_at', { ascending: false });
+        if (error) showAlert("Error al cargar los presupuestos: " + error.message, 'error');
+        else setBudgets(data as Budget[] || []);
+    }, []);
+    
+    const fetchInquiries = useCallback(async (userId: string) => {
+        const { data, error } = await supabase.from('inquiries').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+        if (error) showAlert("Error al cargar las consultas: " + error.message, 'error');
+        else setInquiries(data as Inquiry[] || []);
+    }, []);
+
+    const fetchUserData = useCallback(async (userId: string) => {
+        const { data: eventsData, error: eventsError } = await supabase.from('events').select('*, client:clients(*)').eq('user_id', userId).order('date', { ascending: false });
+        if (eventsError) showAlert("Error al cargar los eventos: " + eventsError.message, 'error');
+        else setEvents(eventsData as Event[] || []);
+        
+        const { data: announcementData, error: announcementError } = await supabase.from('announcements').select('*').eq('is_active', true).limit(1).single();
+        if(announcementData && !announcementError) {
+             const announcementId = announcementData.id;
+             const hasSeen = sessionStorage.getItem(`seen_announcement_${announcementId}`);
+             if (!hasSeen) {
+                 setActiveAnnouncement(announcementData as Announcement);
+                 setIsAnnouncementModalOpen(true);
+                 sessionStorage.setItem(`seen_announcement_${announcementId}`, 'true');
+             }
+        }
+        
+        const { data: notificationsData, error: notificationsError } = await supabase.from('notifications').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+        if(notificationsError) showAlert("Error al cargar notificaciones: " + notificationsError.message, 'error');
+        else setNotifications(notificationsData as Notification[] || []);
+
+    }, []);
+
+    useEffect(() => {
+        if (!currentUser) return;
+        const fetchData = async () => {
+            setLoading(true);
+            if (currentUser.role === 'admin') await fetchAdminData();
+            else {
+                await fetchUserData(currentUser.id);
+                await fetchClients(currentUser.id);
+                await fetchBudgets(currentUser.id);
+                await fetchInquiries(currentUser.id);
+            }
+            setLoading(false);
+        };
+        fetchData();
+    }, [currentUser, fetchAdminData, fetchUserData, fetchClients, fetchBudgets, fetchInquiries]);
+
+    const fetchChatUsers = useCallback(async () => {
+        setChatError(null);
+        try {
+            const { data, error } = await supabase.rpc('get_chat_users_with_details');
+            if (error) throw error;
+            setChatUsers((data as ChatUser[]) || []);
+        } catch (error: any) {
+            console.error("Error fetching chat users", error);
+            if (error.message.includes("404")) { 
+                 setChatError("La función de chat no está configurada en la base de datos.");
+            } else {
+                 setChatError("Error al cargar usuarios del chat.");
+            }
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!currentUser) return;
+
+        const fetchInitialMessages = async () => {
+             setChatError(null);
+             try {
+                 if (currentUser.role === 'admin') {
+                    await fetchChatUsers();
+                    const { data: allMessages, error } = await supabase.from('chat_messages').select('*').order('created_at');
+                    if (error) throw error;
+                    setChatMessages((allMessages as ChatMessage[]) || []);
+                 } else {
+                    const { data, error } = await supabase.from('chat_messages').select('*').eq('user_id', currentUser.id).order('created_at');
+                    if (error) throw error;
+                    setChatMessages((data as ChatMessage[]) || []);
+                 }
+            } catch (error: any) {
+                console.error("Error fetching messages", error);
+                if (error.message.includes("does not exist")) { 
+                    setChatError("La tabla de chat no está configurada en la base de datos.");
+                } else {
+                    setChatError("Error al cargar los mensajes.");
+                }
+            }
+        }
+        fetchInitialMessages();
+
+        const channel = supabase.channel('chat-messages-realtime')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' },
+                async (payload) => {
+                    const newMessage = payload.new as ChatMessage;
+                    if (currentUser.role === 'admin') {
+                        setChatMessages(prev => [...prev, newMessage]);
+                        await fetchChatUsers();
+                    } else if (newMessage.user_id === currentUser.id) {
+                         setChatMessages(prev => [...prev, newMessage]);
+                    }
+                }
+            )
+            .subscribe();
+        
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [currentUser, fetchChatUsers]);
+
+    const handleLogout = async () => {
+        sessionStorage.clear();
+        await supabase.auth.signOut();
+        setCurrentPage('dashboard');
+    };
+    
+    const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
+    
+    const saveEvent = async (event: Event) => {
+        const isNew = !event.id;
+        
+        const payload: any = {
+            user_id: currentUser!.id,
+            client_id: event.client_id,
+            name: event.name,
+            location: event.location,
+            date: event.date,
+            amount_charged: event.amount_charged,
+            expenses: event.expenses.map(({ id: expenseId, ...rest }) => rest),
+            observations: event.observations,
+        };
+        
+        if (!isNew) {
+            payload.id = event.id;
+        }
+
+        const { error } = await supabase.from('events').upsert(payload);
+
+        if (error) {
+            showAlert('Error al guardar el evento: ' + error.message, 'error');
+        } else {
+            showAlert('Evento guardado exitosamente.', 'success');
+            await logActivity(isNew ? 'event_created' : 'event_updated', { eventName: event.name });
+            if (isNew) {
+                const eventClient = clients.find(c => c.id === event.client_id);
+                if (eventClient && eventClient.email) {
+                    await supabase.functions.invoke('send-event-confirmation', {
+                        body: {
+                            clientEmail: eventClient.email,
+                            clientName: eventClient.name,
+                            eventName: event.name,
+                            eventDate: event.date,
+                            eventLocation: event.location,
+                            companyName: currentUser!.company_name,
+                        }
+                    });
+                }
+            }
+            await fetchUserData(currentUser!.id);
+        }
+    };
+
+    const deleteEvent = async (eventId: string) => {
+        if (window.confirm('¿Estás seguro de que quieres eliminar este evento?')) {
+            const eventToDelete = events.find(e => e.id === eventId);
+            const { error } = await supabase.from('events').delete().eq('id', eventId);
+            if (error) showAlert('Error al eliminar el evento: ' + error.message, 'error');
+            else {
+                showAlert('Evento eliminado.', 'success');
+                await logActivity('event_deleted', { eventName: eventToDelete?.name || 'Desconocido' });
+                await fetchUserData(currentUser!.id);
+            }
+        }
+    };
+
+    const saveClient = async (client: Client): Promise<Client | null> => {
+        const isNew = !client.id;
+        
+        const payload: any = {
+            user_id: currentUser!.id,
+            name: client.name,
+            phone: client.phone,
+            email: client.email,
+        };
+        
+        if (!isNew) {
+            payload.id = client.id;
+        }
+        
+        const { data, error } = await supabase.from('clients').upsert(payload).select().single();
+
+        if (error) {
+            showAlert('Error al guardar el cliente: ' + error.message, 'error');
+            return null;
+        } else {
+            showAlert('Cliente guardado exitosamente.', 'success');
+            await logActivity(isNew ? 'client_created' : 'client_updated', { clientName: client.name });
+            if (isNew && client.email) {
+                 await supabase.functions.invoke('send-welcome-email', {
+                    body: { email: client.email, name: client.name, djCompanyName: currentUser!.company_name },
+                });
+            }
+            await fetchClients(currentUser!.id);
+            return data as Client;
+        }
+    };
+    
+    const deleteClient = async (clientId: string) => {
+        if (window.confirm('¿Estás seguro de que quieres eliminar este cliente? Esto no eliminará sus eventos asociados.')) {
+            const clientToDelete = clients.find(c => c.id === clientId);
+            const { error } = await supabase.from('clients').delete().eq('id', clientId);
+            if (error) showAlert('Error al eliminar el cliente: ' + error.message, 'error');
+            else {
+                showAlert('Cliente eliminado.', 'success');
+                await logActivity('client_deleted', { clientName: clientToDelete?.name || 'Desconocido' });
+                await fetchClients(currentUser!.id);
+            }
+        }
+    };
+
+    const saveUser = async (user: User, password?: string) => {
+        const isNewUser = !user.id;
+        const { id, role, status, activeUntil, company_name, companyLogoUrl, notification_email } = user;
+
+        if (isNewUser) {
+             if (!user.email || !password) {
+                showAlert("Email y contraseña son requeridos para crear un usuario.", 'error');
+                return;
+            }
+            const { error } = await supabase.functions.invoke('create-user', {
+                body: { email: user.email, password, companyName: company_name, activeUntil },
+            });
+            if (error) showAlert("Error al crear usuario: " + error.message, 'error');
+            else {
+                showAlert("Usuario creado exitosamente.", 'success');
+                await logActivity('admin_user_created', { userEmail: user.email });
+                await fetchAdminData();
+            }
+        } else {
+            const updateData: any = { role, status, active_until: activeUntil, company_name, company_logo_url: companyLogoUrl };
+            if (currentUser?.role === 'admin') {
+                updateData.notification_email = notification_email;
+            }
+            const { error } = await supabase.from('profiles').update(updateData).eq('id', id);
+
+            if (error) showAlert("Error actualizando perfil: " + error.message, 'error');
+            else {
+                await fetchAdminData();
+                if (currentUser?.id === user.id) setCurrentUser(await fetchUserProfile(user.id));
+                showAlert("Perfil actualizado exitosamente.", 'success');
+                await logActivity('admin_user_updated', { userEmail: user.email });
+            }
+        }
+    };
+    
+    const uploadFile = async (bucket: string, path: string, file: File) => {
+         const { error } = await supabase.storage.from(bucket).upload(path, file, { upsert: true });
+        if (error) {
+            showAlert(`Error al subir archivo: ${error.message}`, 'error');
+            return null;
+        }
+        const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+        return `${data.publicUrl}?t=${new Date().getTime()}`;
+    }
+
+    const uploadLogo = (userId: string, file: File) => uploadFile('logos', `${userId}/logo.${file.name.split('.').pop()}`, file);
+
+    const saveAnnouncement = async (announcement: Announcement, imageFile?: File | null) => {
+        let imageUrl = announcement.image_url;
+        if(imageFile) {
+            const newImageUrl = await uploadFile('announcements', `image_${Date.now()}.${imageFile.name.split('.').pop()}`, imageFile);
+            if(!newImageUrl) return; // Stop if upload fails
+            imageUrl = newImageUrl;
+        }
+        
+        const payload = {
+            title: announcement.title,
+            content: announcement.content,
+            image_url: imageUrl,
+            is_active: announcement.is_active,
+            created_by: currentUser!.id
+        };
+        
+        const upsertData = announcement.id ? { ...payload, id: announcement.id } : payload;
+
+        const { error } = await supabase.from('announcements').upsert(upsertData);
+        if(error) showAlert('Error guardando anuncio: ' + error.message, 'error');
+        else {
+            showAlert('Anuncio guardado exitosamente.', 'success');
+            await logActivity('admin_announcement_saved', { title: announcement.title });
+            await fetchAdminData();
+        }
+    };
+
+    const deleteAnnouncement = async (id: string) => {
+        if(window.confirm('¿Estás seguro de que quieres eliminar este anuncio?')) {
+            const announcementToDelete = announcements.find(a => a.id === id);
+            const { error } = await supabase.from('announcements').delete().eq('id', id);
+            if(error) showAlert('Error eliminando anuncio: ' + error.message, 'error');
+            else {
+                showAlert('Anuncio eliminado.', 'success');
+                await logActivity('admin_announcement_deleted', { title: announcementToDelete?.title || 'Desconocido' });
+                await fetchAdminData();
+            }
+        }
+    };
+    
+    const toggleAnnouncementActive = async (announcement: Announcement) => {
+        const { error: deactivateError } = await supabase.from('announcements').update({ is_active: false }).neq('id', announcement.id);
+        if(deactivateError) {
+             showAlert('Error al actualizar anuncios: ' + deactivateError.message, 'error');
+             return;
+        }
+        
+        const { error: activateError } = await supabase.from('announcements').update({ is_active: !announcement.is_active }).eq('id', announcement.id);
+        if(activateError) showAlert('Error al activar anuncio: ' + activateError.message, 'error');
+        else await fetchAdminData();
+    };
+    
+    const sendNotificationToAll = async (message: string) => {
+        if(!message.trim()) {
+            showAlert('El mensaje no puede estar vacío.', 'error');
+            return;
+        }
+        const { error } = await supabase.functions.invoke('send-notification', { body: { message } });
+        if(error) showAlert('Error al enviar notificación: ' + error.message, 'error');
+        else {
+            showAlert('Notificación enviada a todos los usuarios.', 'success');
+            await logActivity('admin_mass_notification_sent');
+        }
+    };
+
+    const markNotificationsAsRead = async () => {
+        const unreadIds = notifications.filter(n => !n.is_read).map(n => n.id);
+        if (unreadIds.length === 0) return;
+        
+        const { error } = await supabase.from('notifications').update({ is_read: true }).in('id', unreadIds);
+        if(error) console.error("Error marking notifications as read:", error);
+        else {
+            const updatedNotifications = notifications.map(n => ({...n, is_read: true}));
+            setNotifications(updatedNotifications);
+        }
+    };
+
+    const daysUntilExpiry = useMemo(() => {
+        if (!currentUser?.activeUntil) return null;
+        const expiryDate = new Date(currentUser.activeUntil);
+        const today = new Date();
+        const diffTime = expiryDate.getTime() - today.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        return diffDays;
+    }, [currentUser]);
+    
+    const saveBudget = async (budget: Budget) => {
+        const isNew = !budget.id;
+        
+        const payload: any = {
+            user_id: currentUser!.id,
+            client_id: budget.client_id,
+            title: budget.title,
+            status: budget.status,
+            items: budget.items.map(({ id: itemId, ...rest }) => rest),
+            discount: budget.discount,
+            notes: budget.notes,
+            valid_until: budget.valid_until,
+        };
+
+        if (!isNew) {
+            payload.id = budget.id;
+        }
+        
+        const { error } = await supabase.from('budgets').upsert(payload);
+
+        if (error) {
+            showAlert('Error al guardar el presupuesto: ' + error.message, 'error');
+        } else {
+            showAlert('Presupuesto guardado exitosamente.', 'success');
+            await logActivity(isNew ? 'budget_created' : 'budget_updated', { title: budget.title });
+            await fetchBudgets(currentUser!.id);
+        }
+    };
+
+    const deleteBudget = async (budgetId: string) => {
+        if (window.confirm('¿Estás seguro de que quieres eliminar este presupuesto?')) {
+            const budgetToDelete = budgets.find(b => b.id === budgetId);
+            const { error } = await supabase.from('budgets').delete().eq('id', budgetId);
+            if (error) showAlert('Error al eliminar el presupuesto: ' + error.message, 'error');
+            else {
+                showAlert('Presupuesto eliminado.', 'success');
+                await logActivity('budget_deleted', { title: budgetToDelete?.title || 'Desconocido' });
+                await fetchBudgets(currentUser!.id);
+            }
+        }
+    };
+    
+    const convertInquiryToBudget = async (inquiry: Inquiry) => {
+        let client = clients.find(c => c.email && c.email === inquiry.client_email && inquiry.client_email !== '');
+        
+        if (!client) {
+            const newClient = await saveClient({
+                id: '',
+                user_id: currentUser!.id,
+                name: inquiry.client_name,
+                phone: inquiry.client_phone || '',
+                email: inquiry.client_email || ''
+            });
+            if (!newClient) {
+                showAlert("No se pudo crear el cliente desde la consulta.", "error");
+                return;
+            }
+            client = newClient;
+        }
+
+        const newBudget: Budget = {
+            id: '', 
+            user_id: currentUser!.id,
+            client_id: client.id,
+            title: inquiry.event_type || `Presupuesto para ${client.name}`,
+            status: 'Borrador',
+            items: [{ id: Math.random().toString(), description: inquiry.event_type || 'Servicio de DJ', quantity: 1, price: 0 }],
+            discount: 0,
+            notes: inquiry.message || '',
+            created_at: new Date().toISOString()
+        };
+        
+        setSelectedBudget(newBudget);
+        setIsBudgetModalOpen(true);
+        setCurrentPage('budgets');
+    };
+
+    const handleGetInquirySuggestion = async (inquiry: Inquiry) => {
+        setAiSuggestion({ title: 'Sugerencia de Respuesta', suggestion: '', isLoading: true });
+        const suggestion = await getInquiryReplySuggestion(inquiry.message || 'El cliente no dejó un mensaje detallado.');
+        setAiSuggestion(prev => ({ ...prev!, suggestion, isLoading: false }));
+    };
+
+    const handleGetFollowUpSuggestion = async (budget: Budget) => {
+        setAiSuggestion({ title: 'Sugerencia de Seguimiento', suggestion: '', isLoading: true });
+        const clientName = clients.find(c => c.id === budget.client_id)?.name || 'Cliente';
+        const suggestion = await getFollowUpEmailSuggestion(clientName, budget.title);
+        setAiSuggestion(prev => ({ ...prev!, suggestion, isLoading: false }));
+    };
+
+    if (loading) {
+        return <div className="h-screen w-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200">Cargando...</div>;
+    }
+
+    if (path.startsWith('/inquiry/')) {
+        const userId = path.split('/')[2];
+        if (userId) {
+            return <PublicInquiryPage userId={userId} />;
+        }
+    }
+    
+    return (
+        <>
+            {session && currentUser ? (
+                <div className="relative md:flex h-screen bg-gray-100 dark:bg-slate-900 text-gray-900 dark:text-gray-100 overflow-hidden">
+                    {isSidebarOpen && <div className="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden" onClick={() => setIsSidebarOpen(false)}></div>}
+                    <Sidebar
+                        currentPage={currentPage}
+                        setCurrentPage={setCurrentPage}
+                        currentUser={currentUser}
+                        handleLogout={handleLogout}
+                        isOpen={isSidebarOpen}
+                        setIsOpen={setIsSidebarOpen}
+                    />
+                    <main className="flex-1 p-4 md:p-6 overflow-y-auto">
+                        <Header
+                            currentUser={currentUser}
+                            toggleTheme={toggleTheme}
+                            theme={theme}
+                            onMenuClick={() => setIsSidebarOpen(true)}
+                            notifications={notifications}
+                            isNotificationsOpen={isNotificationsOpen}
+                            setIsNotificationsOpen={setIsNotificationsOpen}
+                            markNotificationsAsRead={markNotificationsAsRead}
+                            daysUntilExpiry={daysUntilExpiry}
+                        />
+                        <PageContent
+                            currentPage={currentPage}
+                            setCurrentPage={setCurrentPage}
+                            currentUser={currentUser}
+                            events={events}
+                            clients={clients}
+                            budgets={budgets}
+                            inquiries={inquiries}
+                            saveEvent={saveEvent}
+                            deleteEvent={deleteEvent}
+                            saveClient={saveClient}
+                            deleteClient={deleteClient}
+                            saveBudget={saveBudget}
+                            deleteBudget={deleteBudget}
+                            users={users}
+                            saveUser={saveUser}
+                            uploadLogo={uploadLogo}
+                            showAlert={showAlert}
+                            announcements={announcements}
+                            saveAnnouncement={saveAnnouncement}
+                            deleteAnnouncement={deleteAnnouncement}
+                            toggleAnnouncementActive={toggleAnnouncementActive}
+                            sendNotificationToAll={sendNotificationToAll}
+                            fetchInquiries={fetchInquiries}
+                            convertInquiryToBudget={convertInquiryToBudget}
+                            isBudgetModalOpen={isBudgetModalOpen}
+                            setIsBudgetModalOpen={setIsBudgetModalOpen}
+                            selectedBudget={selectedBudget}
+                            setSelectedBudget={setSelectedBudget}
+                            adminStats={adminStats}
+                            activityLogs={activityLogs}
+                            fetchAdminData={fetchAdminData}
+                            handleGetInquirySuggestion={handleGetInquirySuggestion}
+                            handleGetFollowUpSuggestion={handleGetFollowUpSuggestion}
+                            chatUsers={chatUsers}
+                            chatMessages={chatMessages}
+                            fetchChatUsers={fetchChatUsers}
+                            chatError={chatError}
+                        />
+                    </main>
+                    {isAnnouncementModalOpen && activeAnnouncement && (
+                        <AnnouncementModal 
+                            announcement={activeAnnouncement} 
+                            onClose={() => setIsAnnouncementModalOpen(false)} 
+                        />
+                    )}
+                </div>
+            ) : (
+                <AuthScreen showAlert={showAlert} />
+            )}
+            <AlertModal alertState={alertState} onClose={() => setAlertState({ ...alertState, isOpen: false })} />
+            {aiSuggestion && <AiSuggestionModal {...aiSuggestion} onClose={() => setAiSuggestion(null)} />}
+        </>
+    );
+};
 
 export default App;
