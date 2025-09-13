@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats } from './types';
+import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats, ChatMessage } from './types';
 import { getDashboardInsights, getInquiryReplySuggestion, getFollowUpEmailSuggestion, getBudgetItemsSuggestion } from './services/geminiService';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, PdfIcon, EditIcon, EmailIcon, InquiryIcon, ActivityLogIcon, SparklesIcon, LogoIconOnly } from './components/Icons.tsx';
+import { DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, PdfIcon, EditIcon, EmailIcon, InquiryIcon, ActivityLogIcon, SparklesIcon, LogoIconOnly, MessageSquareIcon, BrainCircuitIcon } from './components/Icons.tsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { createClient, AuthSession } from '@supabase/supabase-js';
+import { GoogleGenAI, Chat } from "@google/genai";
 
 // --- SUPABASE CLIENT ---
 const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL;
@@ -17,11 +18,23 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 export const supabase = createClient(supabaseUrl!, supabaseAnonKey!);
 
+// --- GEMINI AI CLIENT ---
+const ai = process.env.API_KEY ? new GoogleGenAI({ apiKey: process.env.API_KEY }) : null;
+
+
 // --- TYPES ---
 type AlertState = {
     isOpen: boolean;
     message: string;
     type: 'success' | 'error';
+}
+
+type ChatUser = {
+    user_id: string;
+    company_name: string;
+    email: string;
+    last_message_at: string;
+    unread_count: number;
 }
 
 // --- HELPERS ---
@@ -259,6 +272,7 @@ const Sidebar: React.FC<{
                 { page: 'userManagement', label: 'Usuarios', icon: <UserManagementIcon /> },
                 { page: 'announcements', label: 'Anuncios', icon: <AnnouncementIcon /> },
                 { page: 'sendNotification', label: 'Enviar Notificación', icon: <SendIcon /> },
+                { page: 'supportChat', label: 'Mensajes de Soporte', icon: <MessageSquareIcon /> },
                 { page: 'activityLog', label: 'Registro de Actividad', icon: <ActivityLogIcon /> }
             );
         } else {
@@ -268,7 +282,9 @@ const Sidebar: React.FC<{
                 { page: 'events', label: 'Eventos', icon: <EventsIcon /> },
                 { page: 'clients', label: 'Clientes', icon: <ClientsIcon /> },
                 { page: 'agenda', label: 'Agenda', icon: <AgendaIcon /> },
-                { page: 'reports', label: 'Reportes', icon: <ReportsIcon /> }
+                { page: 'reports', label: 'Reportes', icon: <ReportsIcon /> },
+                { page: 'coach', label: 'Coach IA', icon: <BrainCircuitIcon /> },
+                { page: 'supportChat', label: 'Soporte', icon: <MessageSquareIcon /> }
             );
         }
         items.push({ page: 'settings', label: 'Configuración', icon: <SettingsIcon /> });
@@ -737,6 +753,11 @@ const App: React.FC = () => {
     const [budgets, setBudgets] = useState<Budget[]>([]);
     const [inquiries, setInquiries] = useState<Inquiry[]>([]);
 
+    // Chat
+    const [chatUsers, setChatUsers] = useState<ChatUser[]>([]);
+    const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+
+
     // State for budget modal to enable cross-component actions
     const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
     const [selectedBudget, setSelectedBudget] = useState<Budget | null>(null);
@@ -922,6 +943,50 @@ const App: React.FC = () => {
         };
         fetchData();
     }, [currentUser, fetchAdminData, fetchUserData, fetchClients, fetchBudgets, fetchInquiries]);
+
+     // --- CHAT REALTIME ---
+    const fetchChatUsers = useCallback(async () => {
+        const { data, error } = await supabase.rpc('get_chat_users_with_details');
+        if (error) console.error("Error fetching chat users", error);
+        else setChatUsers((data as ChatUser[]) || []);
+    }, []);
+
+    useEffect(() => {
+        if (!currentUser) return;
+
+        const fetchInitialMessages = async () => {
+             if (currentUser.role === 'admin') {
+                await fetchChatUsers();
+                const { data: allMessages, error } = await supabase.from('chat_messages').select('*').order('created_at');
+                if (error) console.error("Error fetching all messages", error);
+                else setChatMessages((allMessages as ChatMessage[]) || []);
+             } else {
+                const { data, error } = await supabase.from('chat_messages').select('*').eq('user_id', currentUser.id).order('created_at');
+                if (error) console.error("Error fetching messages", error);
+                else setChatMessages((data as ChatMessage[]) || []);
+             }
+        }
+        fetchInitialMessages();
+
+        const channel = supabase.channel('chat-messages-realtime')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' },
+                async (payload) => {
+                    const newMessage = payload.new as ChatMessage;
+                    if (currentUser.role === 'admin') {
+                        setChatMessages(prev => [...prev, newMessage]);
+                        await fetchChatUsers(); // Refresh user list with unread counts
+                    } else if (newMessage.user_id === currentUser.id) {
+                         setChatMessages(prev => [...prev, newMessage]);
+                    }
+                }
+            )
+            .subscribe();
+        
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [currentUser, fetchChatUsers]);
+
 
     const handleLogout = async () => {
         sessionStorage.clear(); // Clear session storage on logout
@@ -1326,6 +1391,9 @@ const App: React.FC = () => {
                             fetchAdminData={fetchAdminData}
                             handleGetInquirySuggestion={handleGetInquirySuggestion}
                             handleGetFollowUpSuggestion={handleGetFollowUpSuggestion}
+                            chatUsers={chatUsers}
+                            chatMessages={chatMessages}
+                            fetchChatUsers={fetchChatUsers}
                         />
                     </main>
                     {isAnnouncementModalOpen && activeAnnouncement && (
@@ -1372,6 +1440,7 @@ const PageContent: React.FC<{
     fetchInquiries: (userId: string) => Promise<void>;
     convertInquiryToBudget: (inquiry: Inquiry) => Promise<void>;
     isBudgetModalOpen: boolean;
+    // FIX: Added missing setIsBudgetModalOpen prop to fix TypeScript error.
     setIsBudgetModalOpen: (isOpen: boolean) => void;
     selectedBudget: Budget | null;
     setSelectedBudget: (budget: Budget | null) => void;
@@ -1380,6 +1449,9 @@ const PageContent: React.FC<{
     fetchAdminData: () => Promise<void>;
     handleGetInquirySuggestion: (inquiry: Inquiry) => void;
     handleGetFollowUpSuggestion: (budget: Budget) => void;
+    chatUsers: ChatUser[];
+    chatMessages: ChatMessage[];
+    fetchChatUsers: () => Promise<void>;
 }> = (props) => {
     switch (props.currentPage) {
         case 'dashboard':
@@ -1403,7 +1475,7 @@ const PageContent: React.FC<{
                         deleteBudget={props.deleteBudget} 
                         showAlert={props.showAlert}
                         isModalOpen={props.isBudgetModalOpen}
-                        setIsModalOpen={props.setIsBudgetModalOpen}
+                        setIsModalOpen={props.setIsModalOpen}
                         selectedBudget={props.selectedBudget}
                         setSelectedBudget={props.setSelectedBudget}
                         onGetSuggestion={props.handleGetFollowUpSuggestion}
@@ -1426,6 +1498,15 @@ const PageContent: React.FC<{
             return <SendNotificationPage sendNotificationToAll={props.sendNotificationToAll} />;
         case 'activityLog':
             return <ActivityLogPage logs={props.activityLogs} />;
+        case 'coach':
+            return <CoachPage />;
+        case 'supportChat':
+            return <SupportChatPage 
+                        currentUser={props.currentUser} 
+                        allMessages={props.chatMessages}
+                        chatUsers={props.chatUsers}
+                        fetchChatUsers={props.fetchChatUsers}
+                    />;
         default:
             return <div>Página no encontrada o en construcción.</div>;
     }
@@ -2711,6 +2792,221 @@ const PublicInquiryPage: React.FC<{ userId: string }> = ({ userId }) => {
                     </button>
                 </form>
             </div>
+        </div>
+    );
+};
+
+// --- NEW COACH AND CHAT COMPONENTS ---
+const CoachPage: React.FC = () => {
+    const [messages, setMessages] = useState<{ role: 'user' | 'model', text: string }[]>([]);
+    const [currentInput, setCurrentInput] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const chatSession = useRef<Chat | null>(null);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!ai) return;
+        chatSession.current = ai.chats.create({
+            model: 'gemini-2.5-flash',
+            config: {
+                systemInstruction: "Eres 'Coach IA', un experto en negocios y marketing especializado en la industria de eventos, DJs y entretenimiento. Tu objetivo es proporcionar consejos prácticos, estratégicos y accionables a los usuarios para que mejoren sus negocios. Responde de forma clara, concisa y motivadora. Puedes analizar ideas de negocio, sugerir estrategias de precios, dar consejos para captar clientes, y evaluar el impacto potencial de decisiones financieras. Evita dar consejos financieros garantizados y en su lugar, enfócate en los pros y contras y en las estrategias a considerar.",
+            },
+        });
+        setMessages([{ role: 'model', text: "¡Hola! Soy tu Coach de IA. ¿En qué puedo ayudarte hoy para impulsar tu negocio de eventos?" }]);
+    }, []);
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages]);
+
+    const handleSendMessage = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!currentInput.trim() || isLoading || !chatSession.current) return;
+
+        const userMessage = { role: 'user' as const, text: currentInput };
+        setMessages(prev => [...prev, userMessage, { role: 'model' as const, text: '' }]);
+        setCurrentInput('');
+        setIsLoading(true);
+
+        try {
+            const stream = await chatSession.current.sendMessageStream({ message: currentInput });
+            for await (const chunk of stream) {
+                setMessages(prev => {
+                    const lastMessage = prev[prev.length - 1];
+                    if (lastMessage.role === 'model') {
+                        lastMessage.text += chunk.text;
+                        return [...prev.slice(0, -1), lastMessage];
+                    }
+                    return prev;
+                });
+            }
+        } catch (error) {
+            console.error("Error communicating with AI:", error);
+            setMessages(prev => [...prev.slice(0,-1), { role: 'model', text: "Lo siento, tuve un problema al procesar tu solicitud." }]);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    if (!ai) {
+        return <div className="p-6 bg-white dark:bg-gray-800 rounded-lg shadow text-center">La funcionalidad del Coach IA no está disponible. Por favor, configura la API Key.</div>;
+    }
+
+    return (
+        <div className="flex flex-col h-[calc(100vh-10rem)] bg-white dark:bg-gray-800 rounded-lg shadow">
+            <div className="flex-1 p-4 overflow-y-auto">
+                {messages.map((msg, index) => (
+                    <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
+                        <div className={`max-w-prose p-3 rounded-lg ${msg.role === 'user' ? 'bg-primary-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}>
+                           <p className="whitespace-pre-wrap">{msg.text || '...'}</p>
+                        </div>
+                    </div>
+                ))}
+                <div ref={messagesEndRef} />
+            </div>
+            <form onSubmit={handleSendMessage} className="p-4 border-t dark:border-gray-700 flex items-center">
+                <input
+                    type="text"
+                    value={currentInput}
+                    onChange={(e) => setCurrentInput(e.target.value)}
+                    placeholder="Pregúntale algo a tu coach..."
+                    className="flex-1 p-2 border rounded-l-lg dark:bg-gray-700 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    disabled={isLoading}
+                    aria-label="Escribe tu mensaje al coach de IA"
+                />
+                <button type="submit" disabled={isLoading || !currentInput.trim()} className="px-4 py-2 bg-primary-600 text-white rounded-r-lg disabled:bg-primary-400">
+                    <SendIcon />
+                </button>
+            </form>
+        </div>
+    );
+};
+
+const SupportChatPage: React.FC<{
+    currentUser: User;
+    allMessages: ChatMessage[];
+    chatUsers: ChatUser[];
+    fetchChatUsers: () => void;
+}> = ({ currentUser, allMessages, chatUsers, fetchChatUsers }) => {
+    const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+
+    const markMessagesAsRead = async (userId: string) => {
+        if (currentUser.role === 'admin') {
+            const { error } = await supabase.from('chat_messages').update({ is_read_by_admin: true }).eq('user_id', userId).eq('is_read_by_admin', false);
+            if (error) console.error("Failed to mark messages as read for admin", error);
+            else fetchChatUsers(); // Refresh unread counts
+        } else {
+             const { error } = await supabase.from('chat_messages').update({ is_read_by_user: true }).eq('user_id', currentUser.id).eq('is_read_by_user', false);
+             if (error) console.error("Failed to mark messages as read for user", error);
+        }
+    }
+
+    useEffect(() => {
+        if (currentUser.role === 'admin' && selectedUserId) {
+            markMessagesAsRead(selectedUserId);
+        } else if (currentUser.role === 'user') {
+            markMessagesAsRead(currentUser.id);
+        }
+    }, [selectedUserId, allMessages.length, currentUser.id, currentUser.role]);
+
+    const handleSelectUser = (userId: string) => {
+        setSelectedUserId(userId);
+    };
+
+    if (currentUser.role === 'admin') {
+        return (
+            <div className="flex h-[calc(100vh-10rem)] bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+                <div className="w-1/3 border-r dark:border-gray-700 flex flex-col">
+                    <h3 className="p-4 font-semibold border-b dark:border-gray-700">Conversaciones</h3>
+                    <ul className="flex-1 overflow-y-auto">
+                        {chatUsers.map(user => (
+                            <li key={user.user_id} onClick={() => handleSelectUser(user.user_id)}
+                                className={`p-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 ${selectedUserId === user.user_id ? 'bg-primary-100 dark:bg-primary-900/50' : ''}`}>
+                                <div className="flex justify-between items-center">
+                                    <span className="font-semibold">{user.company_name}</span>
+                                    {user.unread_count > 0 && <span className="bg-red-500 text-white text-xs rounded-full px-2 py-1">{user.unread_count}</span>}
+                                </div>
+                                <p className="text-sm text-gray-500 truncate">{user.email}</p>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+                <div className="w-2/3">
+                    {selectedUserId ? (
+                        <ChatWindow 
+                            currentUser={currentUser}
+                            messages={allMessages.filter(m => m.user_id === selectedUserId)}
+                            recipientId={selectedUserId}
+                        />
+                    ) : (
+                        <div className="flex items-center justify-center h-full text-gray-500">
+                            Selecciona una conversación para empezar
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    return <ChatWindow currentUser={currentUser} messages={allMessages} recipientId={currentUser.id} />;
+};
+
+const ChatWindow: React.FC<{
+    currentUser: User,
+    messages: ChatMessage[],
+    recipientId: string
+}> = ({ currentUser, messages, recipientId }) => {
+    const [newMessage, setNewMessage] = useState('');
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages]);
+
+    const handleSendMessage = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newMessage.trim()) return;
+
+        const payload: Partial<ChatMessage> = {
+            user_id: currentUser.role === 'admin' ? recipientId : currentUser.id,
+            sender_is_admin: currentUser.role === 'admin',
+            content: newMessage,
+            is_read_by_admin: currentUser.role === 'admin',
+            is_read_by_user: currentUser.role !== 'admin'
+        };
+
+        const { error } = await supabase.from('chat_messages').insert(payload);
+        if (error) {
+            console.error("Error sending message:", error);
+        } else {
+            setNewMessage('');
+        }
+    };
+    
+    return (
+        <div className="flex flex-col h-full">
+            <div className="flex-1 p-4 overflow-y-auto">
+                {messages.map(msg => (
+                    <div key={msg.id} className={`flex ${msg.sender_is_admin !== (currentUser.role === 'admin') ? 'justify-start' : 'justify-end'} mb-4`}>
+                        <div className={`max-w-prose p-3 rounded-lg ${msg.sender_is_admin !== (currentUser.role === 'admin') ? 'bg-gray-200 dark:bg-gray-700' : 'bg-primary-600 text-white'}`}>
+                            {msg.content}
+                            <div className="text-xs opacity-70 mt-1 text-right">{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                        </div>
+                    </div>
+                ))}
+                 <div ref={messagesEndRef} />
+            </div>
+            <form onSubmit={handleSendMessage} className="p-4 border-t dark:border-gray-700 flex items-center">
+                <input
+                    type="text"
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    placeholder="Escribe un mensaje..."
+                    className="flex-1 p-2 border rounded-l-lg dark:bg-gray-700 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    aria-label="Escribe tu mensaje de soporte"
+                />
+                <button type="submit" className="px-4 py-2 bg-primary-600 text-white rounded-r-lg"><SendIcon /></button>
+            </form>
         </div>
     );
 };
