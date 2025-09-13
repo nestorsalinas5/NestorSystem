@@ -1440,7 +1440,6 @@ const PageContent: React.FC<{
     fetchInquiries: (userId: string) => Promise<void>;
     convertInquiryToBudget: (inquiry: Inquiry) => Promise<void>;
     isBudgetModalOpen: boolean;
-    // FIX: Added missing setIsBudgetModalOpen prop to fix TypeScript error.
     setIsBudgetModalOpen: (isOpen: boolean) => void;
     selectedBudget: Budget | null;
     setSelectedBudget: (budget: Budget | null) => void;
@@ -1475,7 +1474,7 @@ const PageContent: React.FC<{
                         deleteBudget={props.deleteBudget} 
                         showAlert={props.showAlert}
                         isModalOpen={props.isBudgetModalOpen}
-                        setIsModalOpen={props.setIsModalOpen}
+                        setIsModalOpen={props.setIsBudgetModalOpen}
                         selectedBudget={props.selectedBudget}
                         setSelectedBudget={props.setSelectedBudget}
                         onGetSuggestion={props.handleGetFollowUpSuggestion}
@@ -2830,19 +2829,22 @@ const CoachPage: React.FC = () => {
 
         try {
             const stream = await chatSession.current.sendMessageStream({ message: currentInput });
+            let streamedText = "";
             for await (const chunk of stream) {
+                streamedText += chunk.text;
                 setMessages(prev => {
-                    const lastMessage = prev[prev.length - 1];
-                    if (lastMessage.role === 'model') {
-                        lastMessage.text += chunk.text;
-                        return [...prev.slice(0, -1), lastMessage];
-                    }
-                    return prev;
+                    const newMessages = [...prev];
+                    newMessages[newMessages.length - 1] = { ...newMessages[newMessages.length - 1], text: streamedText };
+                    return newMessages;
                 });
             }
         } catch (error) {
             console.error("Error communicating with AI:", error);
-            setMessages(prev => [...prev.slice(0,-1), { role: 'model', text: "Lo siento, tuve un problema al procesar tu solicitud." }]);
+            setMessages(prev => {
+                const newMessages = [...prev];
+                newMessages[newMessages.length - 1] = { role: 'model', text: "Lo siento, tuve un problema al procesar tu solicitud." };
+                return newMessages;
+            });
         } finally {
             setIsLoading(false);
         }
@@ -2858,7 +2860,7 @@ const CoachPage: React.FC = () => {
                 {messages.map((msg, index) => (
                     <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
                         <div className={`max-w-prose p-3 rounded-lg ${msg.role === 'user' ? 'bg-primary-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}>
-                           <p className="whitespace-pre-wrap">{msg.text || '...'}</p>
+                           <p className="whitespace-pre-wrap">{msg.text || (isLoading && index === messages.length -1 ? '...' : '')}</p>
                         </div>
                     </div>
                 ))}
@@ -2890,7 +2892,7 @@ const SupportChatPage: React.FC<{
 }> = ({ currentUser, allMessages, chatUsers, fetchChatUsers }) => {
     const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
-    const markMessagesAsRead = async (userId: string) => {
+    const markMessagesAsRead = useCallback(async (userId: string) => {
         if (currentUser.role === 'admin') {
             const { error } = await supabase.from('chat_messages').update({ is_read_by_admin: true }).eq('user_id', userId).eq('is_read_by_admin', false);
             if (error) console.error("Failed to mark messages as read for admin", error);
@@ -2899,15 +2901,16 @@ const SupportChatPage: React.FC<{
              const { error } = await supabase.from('chat_messages').update({ is_read_by_user: true }).eq('user_id', currentUser.id).eq('is_read_by_user', false);
              if (error) console.error("Failed to mark messages as read for user", error);
         }
-    }
+    }, [currentUser.id, currentUser.role, fetchChatUsers]);
 
     useEffect(() => {
         if (currentUser.role === 'admin' && selectedUserId) {
             markMessagesAsRead(selectedUserId);
         } else if (currentUser.role === 'user') {
+            // Mark messages as read whenever the chat is open for the user
             markMessagesAsRead(currentUser.id);
         }
-    }, [selectedUserId, allMessages.length, currentUser.id, currentUser.role]);
+    }, [selectedUserId, allMessages.length, currentUser.id, currentUser.role, markMessagesAsRead]);
 
     const handleSelectUser = (userId: string) => {
         setSelectedUserId(userId);
@@ -2919,9 +2922,11 @@ const SupportChatPage: React.FC<{
                 <div className="w-1/3 border-r dark:border-gray-700 flex flex-col">
                     <h3 className="p-4 font-semibold border-b dark:border-gray-700">Conversaciones</h3>
                     <ul className="flex-1 overflow-y-auto">
-                        {chatUsers.map(user => (
+                        {chatUsers
+                          .sort((a,b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime())
+                          .map(user => (
                             <li key={user.user_id} onClick={() => handleSelectUser(user.user_id)}
-                                className={`p-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 ${selectedUserId === user.user_id ? 'bg-primary-100 dark:bg-primary-900/50' : ''}`}>
+                                className={`p-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 ${selectedUserId === user.user_id ? 'bg-primary-50 dark:bg-primary-900/50' : ''}`}>
                                 <div className="flex justify-between items-center">
                                     <span className="font-semibold">{user.company_name}</span>
                                     {user.unread_count > 0 && <span className="bg-red-500 text-white text-xs rounded-full px-2 py-1">{user.unread_count}</span>}
@@ -2931,7 +2936,7 @@ const SupportChatPage: React.FC<{
                         ))}
                     </ul>
                 </div>
-                <div className="w-2/3">
+                <div className="w-2/3 flex flex-col">
                     {selectedUserId ? (
                         <ChatWindow 
                             currentUser={currentUser}
@@ -2940,7 +2945,7 @@ const SupportChatPage: React.FC<{
                         />
                     ) : (
                         <div className="flex items-center justify-center h-full text-gray-500">
-                            Selecciona una conversación para empezar
+                            <p>Selecciona una conversación para empezar.</p>
                         </div>
                     )}
                 </div>
@@ -2948,13 +2953,14 @@ const SupportChatPage: React.FC<{
         );
     }
 
+    // User View
     return <ChatWindow currentUser={currentUser} messages={allMessages} recipientId={currentUser.id} />;
 };
 
 const ChatWindow: React.FC<{
     currentUser: User,
     messages: ChatMessage[],
-    recipientId: string
+    recipientId: string // For admin, this is the user_id. For user, it's their own id.
 }> = ({ currentUser, messages, recipientId }) => {
     const [newMessage, setNewMessage] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -2984,16 +2990,19 @@ const ChatWindow: React.FC<{
     };
     
     return (
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col h-full bg-white dark:bg-gray-800 rounded-r-lg">
             <div className="flex-1 p-4 overflow-y-auto">
-                {messages.map(msg => (
-                    <div key={msg.id} className={`flex ${msg.sender_is_admin !== (currentUser.role === 'admin') ? 'justify-start' : 'justify-end'} mb-4`}>
-                        <div className={`max-w-prose p-3 rounded-lg ${msg.sender_is_admin !== (currentUser.role === 'admin') ? 'bg-gray-200 dark:bg-gray-700' : 'bg-primary-600 text-white'}`}>
-                            {msg.content}
-                            <div className="text-xs opacity-70 mt-1 text-right">{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                {messages.map(msg => {
+                    const isMyMessage = msg.sender_is_admin === (currentUser.role === 'admin');
+                    return (
+                        <div key={msg.id} className={`flex ${isMyMessage ? 'justify-end' : 'justify-start'} mb-4`}>
+                            <div className={`max-w-prose p-3 rounded-lg ${isMyMessage ? 'bg-primary-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}>
+                                {msg.content}
+                                <div className="text-xs opacity-70 mt-1 text-right">{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                            </div>
                         </div>
-                    </div>
-                ))}
+                    )
+                })}
                  <div ref={messagesEndRef} />
             </div>
             <form onSubmit={handleSendMessage} className="p-4 border-t dark:border-gray-700 flex items-center">
@@ -3005,7 +3014,7 @@ const ChatWindow: React.FC<{
                     className="flex-1 p-2 border rounded-l-lg dark:bg-gray-700 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500"
                     aria-label="Escribe tu mensaje de soporte"
                 />
-                <button type="submit" className="px-4 py-2 bg-primary-600 text-white rounded-r-lg"><SendIcon /></button>
+                <button type="submit" className="px-4 py-2 bg-primary-600 text-white rounded-r-lg disabled:bg-primary-300" disabled={!newMessage.trim()}><SendIcon /></button>
             </form>
         </div>
     );
