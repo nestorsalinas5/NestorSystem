@@ -37,6 +37,7 @@ export interface User {
   activeUntil: string; // ISO string
   company_name: string;
   companyLogoUrl?: string; // URL from Supabase Storage
+  notification_email?: string; // Email for admin chat notifications
 }
 
 export interface Announcement {
