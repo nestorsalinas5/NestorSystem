@@ -2293,19 +2293,30 @@ const ChatWindow: React.FC<{
         e.preventDefault();
         if (!newMessage.trim()) return;
 
-        const payload: Partial<ChatMessage> = {
+        const payload = {
             user_id: currentUser.role === 'admin' ? recipientId : currentUser.id,
             sender_is_admin: currentUser.role === 'admin',
-            content: newMessage,
+            content: newMessage, // The error is likely here, DB expects JSON
             is_read_by_admin: currentUser.role === 'admin',
             is_read_by_user: currentUser.role !== 'admin'
         };
 
         const { error } = await supabase.from('chat_messages').insert(payload);
+        
         if (error) {
             console.error("Error sending message:", error);
         } else {
             setNewMessage('');
+        }
+    };
+
+    const renderMessageContent = (content: string) => {
+        try {
+            // This will safely parse content that was saved as a JSON string (e.g., `"hello"`)
+            // and return the raw content for older messages that were plain text.
+            return JSON.parse(content);
+        } catch (e) {
+            return content;
         }
     };
     
@@ -2317,7 +2328,7 @@ const ChatWindow: React.FC<{
                     return (
                         <div key={msg.id} className={`flex ${isMyMessage ? 'justify-end' : 'justify-start'} mb-4`}>
                             <div className={`max-w-prose p-3 rounded-lg ${isMyMessage ? 'bg-primary-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}>
-                                {msg.content}
+                                {renderMessageContent(msg.content)}
                                 <div className="text-xs opacity-70 mt-1 text-right">{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                             </div>
                         </div>
