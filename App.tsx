@@ -8,7 +8,7 @@ import {
     LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, 
     SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, 
     PdfIcon, EditIcon, EmailIcon, InquiryIcon, ActivityLogIcon, SparklesIcon, LogoIconOnly, 
-    MessageSquareIcon, BrainCircuitIcon, DatabaseIcon 
+    MessageSquareIcon, BrainCircuitIcon
 } from './components/Icons.tsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -371,8 +371,7 @@ const Sidebar: React.FC<{
                 { page: 'announcements', label: 'Anuncios', icon: <AnnouncementIcon /> },
                 { page: 'sendNotification', label: 'Enviar Notificación', icon: <SendIcon /> },
                 { page: 'supportChat', label: 'Mensajes de Soporte', icon: <MessageSquareIcon /> },
-                { page: 'activityLog', label: 'Registro de Actividad', icon: <ActivityLogIcon /> },
-                { page: 'databaseSetup', label: 'Configuración de BD', icon: <DatabaseIcon /> }
+                { page: 'activityLog', label: 'Registro de Actividad', icon: <ActivityLogIcon /> }
             );
         } else {
              items.push(
@@ -779,8 +778,6 @@ const PageContent: React.FC<{
             return <SendNotificationPage sendNotificationToAll={props.sendNotificationToAll} />;
         case 'activityLog':
             return <ActivityLogPage logs={props.activityLogs} />;
-        case 'databaseSetup':
-            return <DatabaseSetupPage />;
         case 'coach':
             return <CoachPage />;
         case 'supportChat':
@@ -2218,9 +2215,6 @@ const SupportChatPage: React.FC<{
                 <p className="mt-2 text-gray-600 dark:text-gray-400">
                     {chatError}
                 </p>
-                 <p className="mt-4">
-                    Por favor, ve a la página de <button onClick={() => setCurrentPage('databaseSetup')} className="text-primary-600 hover:underline font-semibold">Configuración de BD</button> y sigue las instrucciones para activar el chat.
-                 </p>
             </div>
         );
     }
@@ -2296,7 +2290,7 @@ const ChatWindow: React.FC<{
         const payload = {
             user_id: currentUser.role === 'admin' ? recipientId : currentUser.id,
             sender_is_admin: currentUser.role === 'admin',
-            content: newMessage, // The error is likely here, DB expects JSON
+            content: JSON.stringify(newMessage), // FIX: Stringify content for jsonb column
             is_read_by_admin: currentUser.role === 'admin',
             is_read_by_user: currentUser.role !== 'admin'
         };
@@ -2347,225 +2341,6 @@ const ChatWindow: React.FC<{
                 />
                 <button type="submit" className="px-4 py-2 bg-primary-600 text-white rounded-r-lg disabled:bg-primary-300" disabled={!newMessage.trim()}><SendIcon /></button>
             </form>
-        </div>
-    );
-};
-
-const DatabaseSetupPage: React.FC = () => {
-    
-    const CodeBlock: React.FC<{ title: string; sql: string }> = ({ title, sql }) => {
-        const [copied, setCopied] = useState(false);
-        const handleCopy = () => {
-            navigator.clipboard.writeText(sql.trim());
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-        };
-        return (
-            <div className="mb-6">
-                <h4 className="text-lg font-semibold mb-2">{title}</h4>
-                <div className="relative bg-gray-100 dark:bg-gray-900 rounded-lg p-4 font-mono text-sm overflow-x-auto">
-                    <button onClick={handleCopy} className="absolute top-2 right-2 px-2 py-1 bg-gray-300 dark:bg-gray-700 text-xs rounded">
-                        {copied ? '¡Copiado!' : 'Copiar'}
-                    </button>
-                    <pre><code>{sql.trim()}</code></pre>
-                </div>
-            </div>
-        );
-    };
-
-    const sqlSteps = {
-        chatTable: `
-CREATE TABLE public.chat_messages (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL,
-  sender_is_admin boolean NOT NULL DEFAULT false,
-  content text NOT NULL,
-  created_at timestamp with time zone NOT NULL DEFAULT now(),
-  is_read_by_user boolean NOT NULL DEFAULT false,
-  is_read_by_admin boolean NOT NULL DEFAULT false,
-  CONSTRAINT chat_messages_pkey PRIMARY KEY (id),
-  CONSTRAINT chat_messages_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
-);
-
-ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Allow admin full access" ON public.chat_messages FOR ALL
-TO authenticated
-USING ( (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin' );
-
-CREATE POLICY "Allow user access to their own messages" ON public.chat_messages FOR ALL
-TO authenticated
-USING ( user_id = auth.uid() );`,
-        
-        rpcFunction: `
-CREATE OR REPLACE FUNCTION get_chat_users_with_details()
-RETURNS TABLE(user_id uuid, company_name text, email text, last_message_at timestamptz, unread_count bigint)
-LANGUAGE sql
-SECURITY DEFINER
-AS $$
-  SELECT
-    u.id as user_id,
-    p.company_name,
-    u.email,
-    MAX(cm.created_at) as last_message_at,
-    COUNT(CASE WHEN cm.is_read_by_admin = false AND cm.sender_is_admin = false THEN 1 END) as unread_count
-  FROM
-    auth.users u
-  JOIN
-    public.profiles p ON u.id = p.id
-  LEFT JOIN
-    public.chat_messages cm ON u.id = cm.user_id
-  WHERE
-    p.role = 'user'
-  GROUP BY
-    u.id, p.company_name, u.email
-  ORDER BY
-    last_message_at DESC NULLS LAST;
-$$;`,
-        notificationColumn: `
-ALTER TABLE public.profiles
-ADD COLUMN notification_email TEXT;`,
-
-        triggerFunction: `
-CREATE OR REPLACE FUNCTION notify_admin_on_new_message()
-RETURNS trigger
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-  admin_email TEXT;
-  user_company_name TEXT;
-BEGIN
-  -- Only trigger for messages sent by users (not admins)
-  IF NEW.sender_is_admin = false THEN
-    -- Find an admin's notification email (takes the first one found)
-    SELECT notification_email INTO admin_email FROM public.profiles WHERE role = 'admin' AND notification_email IS NOT NULL LIMIT 1;
-
-    -- Find the user's company name
-    SELECT company_name INTO user_company_name FROM public.profiles WHERE id = NEW.user_id;
-
-    -- If an admin notification email is configured, invoke the edge function
-    IF admin_email IS NOT NULL THEN
-      PERFORM net.http_post(
-        url:= supabase_url() || '/functions/v1/send-chat-notification',
-        headers:='{"Authorization": "Bearer ' || supa_service_role_key() || '", "Content-Type": "application/json"}'::jsonb,
-        body:=jsonb_build_object(
-          'admin_email', admin_email,
-          'user_company_name', user_company_name,
-          'message_content', NEW.content
-        )
-      );
-    END IF;
-  END IF;
-  RETURN NEW;
-END;
-$$;
-
--- Helper functions to get Supabase URL and Service Role Key (run these first)
-CREATE OR REPLACE FUNCTION supabase_url()
-RETURNS TEXT
-LANGUAGE sql
-IMMUTABLE
-AS $$
-  SELECT 'YOUR_SUPABASE_URL_HERE';
-$$;
-
-CREATE OR REPLACE FUNCTION supa_service_role_key()
-RETURNS TEXT
-LANGUAGE sql
-IMMUTABLE
-AS $$
-  SELECT 'YOUR_SUPABASE_SERVICE_ROLE_KEY_HERE';
-$$;
-`,
-    trigger: `
-CREATE TRIGGER on_new_message_notify_admin
-AFTER INSERT ON public.chat_messages
-FOR EACH ROW
-EXECUTE FUNCTION notify_admin_on_new_message();
-`
-    };
-
-    return (
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow space-y-6">
-            <h3 className="text-xl font-semibold">Configuración de la Base de Datos para el Chat</h3>
-            <p className="text-gray-600 dark:text-gray-400">Para que la funcionalidad del chat y las notificaciones por correo funcionen, necesitas ejecutar los siguientes scripts SQL en tu editor de SQL de Supabase. Cópialos y pégalos en orden.</p>
-
-            <CodeBlock title="Paso 1: Crear Tabla de Mensajes y Políticas de Seguridad" sql={sqlSteps.chatTable} />
-            <CodeBlock title="Paso 2: Crear Función para Obtener Usuarios del Chat" sql={sqlSteps.rpcFunction} />
-            <CodeBlock title="Paso 3: Añadir Columna para Email de Notificación" sql={sqlSteps.notificationColumn} />
-            
-            <div>
-                <h4 className="text-lg font-semibold mb-2">Paso 4: Crear Funciones y Trigger para Notificaciones por Email</h4>
-                <p className="text-sm text-gray-500 mb-2">
-                    <strong>Importante:</strong> Primero, reemplaza `YOUR_SUPABASE_URL_HERE` y `YOUR_SUPABASE_SERVICE_ROLE_KEY_HERE` con tus propios valores de Supabase en el siguiente script. Luego, ejecuta el script completo.
-                </p>
-                <CodeBlock title="Función y Helpers del Trigger" sql={sqlSteps.triggerFunction} />
-            </div>
-
-            <CodeBlock title="Paso 5: Crear el Trigger" sql={sqlSteps.trigger} />
-
-            <div>
-                <h4 className="text-lg font-semibold mb-2">Paso 6: Desplegar la Edge Function</h4>
-                <p className="text-gray-600 dark:text-gray-400 mb-2">
-                    Finalmente, necesitas crear una Supabase Edge Function para enviar los correos. Sigue estos pasos:
-                </p>
-                <ol className="list-decimal list-inside space-y-2 text-sm">
-                    <li>Instala la <a href="https://supabase.com/docs/guides/cli" target="_blank" rel="noopener noreferrer" className="text-primary-500 hover:underline">Supabase CLI</a>.</li>
-                    <li>Ejecuta `supabase functions new send-chat-notification`.</li>
-                    <li>Reemplaza el contenido de `supabase/functions/send-chat-notification/index.ts` con el código de abajo.</li>
-                    <li>Asegúrate de configurar un proveedor de correo (como Resend) y que tu función pueda enviarlos. Este ejemplo usa una función hipotética `resend-email-send`.</li>
-                    <li>Despliega la función con `supabase functions deploy send-chat-notification`.</li>
-                </ol>
-                <CodeBlock title="Código para supabase/functions/send-chat-notification/index.ts" sql={`
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-// NOTA: Este es un ejemplo. Necesitarás tu propia lógica para enviar emails.
-// Este ejemplo asume que tienes otra Edge Function o un servicio para enviar correos.
-async function sendEmail(supabaseAdmin: any, to: string, subject: string, html: string) {
-    // Reemplaza esto con tu lógica de envío de email (ej. Resend, SendGrid)
-    // Ejemplo usando una función 'resend' hipotética:
-    const { error } = await supabaseAdmin.functions.invoke('resend-email-send', {
-        body: { from: 'support@yourdomain.com', to, subject, html }
-    });
-    if (error) throw new Error(\`Failed to send email: \${error.message}\`);
-}
-
-serve(async (req) => {
-  try {
-    const { admin_email, user_company_name, message_content } = await req.json();
-
-    const supabaseAdmin = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
-    );
-
-    await sendEmail(
-      supabaseAdmin,
-      admin_email,
-      \`Nuevo mensaje de soporte de \${user_company_name}\`,
-      \`
-        <p>Has recibido un nuevo mensaje de <strong>\${user_company_name}</strong>.</p>
-        <p><strong>Mensaje:</strong></p>
-        <blockquote style="padding: 10px; border-left: 3px solid #ccc; margin-left: 0;">\${message_content}</blockquote>
-        <p>Inicia sesión en tu panel para responder.</p>
-      \`
-    );
-
-    return new Response(JSON.stringify({ message: "Email sent" }), {
-      headers: { "Content-Type": "application/json" },
-      status: 200,
-    });
-  } catch (error) {
-    console.error("Function error:", error);
-    return new Response(JSON.stringify({ error: error.message }), {
-      headers: { "Content-Type": "application/json" },
-      status: 500,
-    });
-  }
-});`} />
-            </div>
         </div>
     );
 };
