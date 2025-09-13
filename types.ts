@@ -112,5 +112,15 @@ export interface Budget {
   created_at: string;
 }
 
+export interface ChatMessage {
+  id: string;
+  user_id: string; // The user this message thread belongs to
+  sender_is_admin: boolean;
+  content: string;
+  created_at: string;
+  is_read_by_user: boolean;
+  is_read_by_admin: boolean;
+}
+
 // FIX: Added 'inquiries' and 'activityLog' to the Page type to resolve assignment errors.
-export type Page = 'dashboard' | 'events' | 'clients' | 'agenda' | 'reports' | 'settings' | 'userManagement' | 'announcements' | 'sendNotification' | 'budgets' | 'inquiries' | 'activityLog';
+export type Page = 'dashboard' | 'events' | 'clients' | 'agenda' | 'reports' | 'settings' | 'userManagement' | 'announcements' | 'sendNotification' | 'budgets' | 'inquiries' | 'activityLog' | 'coach' | 'supportChat';
