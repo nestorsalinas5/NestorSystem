@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats } from './types';
+import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats, ChatMessage } from './types';
 import { getDashboardInsights, getInquiryReplySuggestion, getFollowUpEmailSuggestion, getBudgetItemsSuggestion } from './services/geminiService';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { 
@@ -7,7 +8,7 @@ import {
     LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, 
     SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, 
     PdfIcon, EditIcon, EmailIcon, InquiryIcon, ActivityLogIcon, SparklesIcon, LogoIconOnly, 
-    BrainCircuitIcon
+    BrainCircuitIcon, MessageSquareIcon
 } from './components/Icons.tsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -365,7 +366,8 @@ const Sidebar: React.FC<{
                 { page: 'userManagement', label: 'Usuarios', icon: <UserManagementIcon /> },
                 { page: 'announcements', label: 'Anuncios', icon: <AnnouncementIcon /> },
                 { page: 'sendNotification', label: 'Enviar Notificación', icon: <SendIcon /> },
-                { page: 'activityLog', label: 'Registro de Actividad', icon: <ActivityLogIcon /> }
+                { page: 'activityLog', label: 'Registro de Actividad', icon: <ActivityLogIcon /> },
+                { page: 'support', label: 'Soporte', icon: <MessageSquareIcon /> }
             );
         } else {
              items.push(
@@ -375,7 +377,8 @@ const Sidebar: React.FC<{
                 { page: 'clients', label: 'Clientes', icon: <ClientsIcon /> },
                 { page: 'agenda', label: 'Agenda', icon: <AgendaIcon /> },
                 { page: 'reports', label: 'Reportes', icon: <ReportsIcon /> },
-                { page: 'coach', label: 'Coach IA', icon: <BrainCircuitIcon /> }
+                { page: 'coach', label: 'Coach IA', icon: <BrainCircuitIcon /> },
+                { page: 'support', label: 'Soporte', icon: <MessageSquareIcon /> }
             );
         }
         items.push({ page: 'settings', label: 'Configuración', icon: <SettingsIcon /> });
@@ -721,6 +724,13 @@ const PageContent: React.FC<{
     fetchAdminData: () => Promise<void>;
     handleGetInquirySuggestion: (inquiry: Inquiry) => void;
     handleGetFollowUpSuggestion: (budget: Budget) => void;
+    // Chat props
+    chatConversations: User[];
+    selectedChatUser: User | null;
+    handleSelectChatUser: (user: User) => void;
+    chatMessages: ChatMessage[];
+    handleSendMessage: (content: string, recipientId?: string) => void;
+    isSendingMessage: boolean;
 }> = (props) => {
     switch (props.currentPage) {
         case 'dashboard':
@@ -769,6 +779,24 @@ const PageContent: React.FC<{
             return <ActivityLogPage logs={props.activityLogs} />;
         case 'coach':
             return <CoachPage />;
+        case 'support':
+            return props.currentUser.role === 'admin' ? (
+                <AdminSupportPage 
+                    conversations={props.chatConversations}
+                    selectedUser={props.selectedChatUser}
+                    onSelectUser={props.handleSelectChatUser}
+                    messages={props.chatMessages}
+                    onSendMessage={props.handleSendMessage}
+                    currentUser={props.currentUser}
+                />
+            ) : (
+                <UserChatPage 
+                    currentUser={props.currentUser}
+                    messages={props.chatMessages}
+                    onSendMessage={props.handleSendMessage}
+                    isLoading={props.isSendingMessage}
+                />
+            );
         default:
             return <div>Página no encontrada o en construcción.</div>;
     }
@@ -2161,6 +2189,148 @@ const CoachPage: React.FC = () => {
     );
 };
 
+const UserChatPage: React.FC<{ currentUser: User, messages: ChatMessage[], onSendMessage: (content: string) => void, isLoading: boolean }> = ({ currentUser, messages, onSendMessage, isLoading }) => {
+    const [input, setInput] = useState('');
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages]);
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (input.trim()) {
+            onSendMessage(input.trim());
+            setInput('');
+        }
+    };
+
+    return (
+        <div className="flex flex-col h-[calc(100vh-10rem)] bg-white dark:bg-gray-800 rounded-lg shadow">
+            <div className="p-4 border-b dark:border-gray-700">
+                <h3 className="text-xl font-semibold">Chat de Soporte con Administrador</h3>
+            </div>
+            <div className="flex-1 p-4 overflow-y-auto">
+                {messages.map((msg) => (
+                    <div key={msg.id} className={`flex ${msg.sender_id === currentUser.id ? 'justify-end' : 'justify-start'} mb-4`}>
+                        <div className={`max-w-prose p-3 rounded-lg ${msg.sender_id === currentUser.id ? 'bg-primary-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}>
+                           <p className="whitespace-pre-wrap">{msg.content}</p>
+                           <p className="text-xs opacity-70 mt-1 text-right">{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                        </div>
+                    </div>
+                ))}
+                 {isLoading && messages[messages.length-1]?.sender_id === currentUser.id && (
+                    <div className="flex justify-end mb-4">
+                        <div className="max-w-prose p-3 rounded-lg bg-primary-600 text-white opacity-50">
+                            <p className="whitespace-pre-wrap">Enviando...</p>
+                        </div>
+                    </div>
+                 )}
+                <div ref={messagesEndRef} />
+            </div>
+            <form onSubmit={handleSubmit} className="p-4 border-t dark:border-gray-700 flex items-center">
+                <input
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder="Escribe tu mensaje..."
+                    className="flex-1 p-2 border rounded-l-lg dark:bg-gray-700 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    aria-label="Escribe tu mensaje al administrador"
+                />
+                <button type="submit" disabled={!input.trim()} className="px-4 py-2 bg-primary-600 text-white rounded-r-lg disabled:bg-primary-400">
+                    <SendIcon />
+                </button>
+            </form>
+        </div>
+    );
+};
+
+const AdminSupportPage: React.FC<{
+    conversations: User[];
+    selectedUser: User | null;
+    onSelectUser: (user: User) => void;
+    messages: ChatMessage[];
+    onSendMessage: (content: string, recipientId: string) => void;
+    currentUser: User;
+}> = ({ conversations, selectedUser, onSelectUser, messages, onSendMessage, currentUser }) => {
+    const [input, setInput] = useState('');
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages]);
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (input.trim() && selectedUser) {
+            onSendMessage(input.trim(), selectedUser.id);
+            setInput('');
+        }
+    };
+    
+    return (
+        <div className="flex h-[calc(100vh-10rem)] bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+            {/* Conversation List */}
+            <div className="w-1/3 border-r dark:border-gray-700 flex flex-col">
+                <div className="p-4 border-b dark:border-gray-700">
+                    <h3 className="text-xl font-semibold">Conversaciones</h3>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                    {conversations.map(user => (
+                        <div
+                            key={user.id}
+                            onClick={() => onSelectUser(user)}
+                            className={`p-4 cursor-pointer border-b dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 ${selectedUser?.id === user.id ? 'bg-primary-100 dark:bg-primary-900/50' : ''}`}
+                        >
+                            <p className="font-semibold">{user.company_name}</p>
+                            <p className="text-sm text-gray-500">{user.email}</p>
+                        </div>
+                    ))}
+                </div>
+            </div>
+            
+            {/* Chat Window */}
+            <div className="w-2/3 flex flex-col">
+                {selectedUser ? (
+                    <>
+                        <div className="p-4 border-b dark:border-gray-700">
+                            <h3 className="text-xl font-semibold">Chat con {selectedUser.company_name}</h3>
+                        </div>
+                        <div className="flex-1 p-4 overflow-y-auto">
+                             {messages.map((msg) => (
+                                <div key={msg.id} className={`flex ${msg.sender_id === currentUser.id ? 'justify-end' : 'justify-start'} mb-4`}>
+                                    <div className={`max-w-prose p-3 rounded-lg ${msg.sender_id === currentUser.id ? 'bg-primary-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}>
+                                       <p className="whitespace-pre-wrap">{msg.content}</p>
+                                       <p className="text-xs opacity-70 mt-1 text-right">{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                                    </div>
+                                </div>
+                            ))}
+                            <div ref={messagesEndRef} />
+                        </div>
+                        <form onSubmit={handleSubmit} className="p-4 border-t dark:border-gray-700 flex items-center">
+                            <input
+                                type="text"
+                                value={input}
+                                onChange={(e) => setInput(e.target.value)}
+                                placeholder={`Responder a ${selectedUser.company_name}...`}
+                                className="flex-1 p-2 border rounded-l-lg dark:bg-gray-700 dark:border-gray-600"
+                                aria-label="Escribe tu respuesta"
+                            />
+                            <button type="submit" className="px-4 py-2 bg-primary-600 text-white rounded-r-lg">
+                                <SendIcon />
+                            </button>
+                        </form>
+                    </>
+                ) : (
+                    <div className="flex-1 flex justify-center items-center">
+                        <p className="text-gray-500">Selecciona una conversación para empezar.</p>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
 // --- MAIN APP COMPONENT ---
 const App: React.FC = () => {
     // --- STATE ---
@@ -2197,6 +2367,13 @@ const App: React.FC = () => {
     // AI State
     const [aiSuggestion, setAiSuggestion] = useState<{ title: string; suggestion: string; isLoading: boolean } | null>(null);
     
+    // Chat State
+    const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+    const [chatConversations, setChatConversations] = useState<User[]>([]);
+    const [selectedChatUser, setSelectedChatUser] = useState<User | null>(null);
+    const [isSendingMessage, setIsSendingMessage] = useState(false);
+    const adminIdRef = useRef<string | null>(null);
+
     // --- ROUTING ---
     const getPathFromHash = () => window.location.hash.substring(1); 
     const [path, setPath] = useState(getPathFromHash());
@@ -2372,6 +2549,135 @@ const App: React.FC = () => {
         };
         fetchData();
     }, [currentUser, fetchAdminData, fetchUserData, fetchClients, fetchBudgets, fetchInquiries]);
+    
+    // --- CHAT FUNCTIONS ---
+    const findAdminId = async () => {
+        if (adminIdRef.current) return adminIdRef.current;
+        const { data, error } = await supabase.from('profiles').select('id').eq('role', 'admin').limit(1).single();
+        if (error || !data) {
+            console.error("Could not find admin user.");
+            return null;
+        }
+        adminIdRef.current = data.id;
+        return data.id;
+    };
+
+    const fetchChatMessages = useCallback(async (userId1: string, userId2: string) => {
+        const { data, error } = await supabase.from('chat_messages')
+            .select('*')
+            .or(`(sender_id.eq.${userId1},recipient_id.eq.${userId2}),(sender_id.eq.${userId2},recipient_id.eq.${userId1})`)
+            .order('created_at', { ascending: true });
+        if (error) {
+            showAlert('Error al cargar mensajes: ' + error.message);
+        } else {
+            setChatMessages(data || []);
+        }
+    }, []);
+    
+    const fetchConversations = useCallback(async () => {
+        if (!currentUser) return;
+        const { data: messageSenders, error: senderError } = await supabase
+            .from('chat_messages')
+            .select('sender_id')
+            .neq('sender_id', currentUser.id);
+
+        if (senderError) {
+            showAlert('Error fetching message senders: ' + senderError.message);
+            return;
+        }
+        const userIds = [...new Set(messageSenders.map(item => item.sender_id))];
+        if (userIds.length === 0) {
+            setChatConversations([]);
+            return;
+        }
+        const { data: profiles, error: profileError } = await supabase
+            .from('profiles')
+            .select('*')
+            .in('id', userIds);
+        
+        if (profileError) {
+            showAlert('Error fetching user profiles for chat: ' + profileError.message);
+        } else {
+            setChatConversations(profiles as User[] || []);
+        }
+    }, [currentUser]);
+
+    const handleSendMessage = async (content: string, recipientId?: string) => {
+        if (!currentUser) return;
+        setIsSendingMessage(true);
+        const adminId = await findAdminId();
+        if (!adminId) {
+            showAlert('No se pudo encontrar al administrador del sistema.');
+            setIsSendingMessage(false);
+            return;
+        }
+
+        const message: Omit<ChatMessage, 'id' | 'created_at' | 'is_read'> = {
+            content,
+            sender_id: currentUser.id,
+            recipient_id: currentUser.role === 'admin' ? recipientId! : adminId,
+        };
+
+        const { error } = await supabase.from('chat_messages').insert(message);
+        setIsSendingMessage(false);
+
+        if (error) {
+            showAlert('Error al enviar mensaje: ' + error.message);
+        } else if (currentUser.role !== 'admin') {
+            await supabase.functions.invoke('send-chat-notification', {
+                body: { senderId: currentUser.id, message: content }
+            });
+        }
+    };
+    
+    const handleSelectChatUser = (user: User) => {
+        setSelectedChatUser(user);
+        if (currentUser) {
+            fetchChatMessages(currentUser.id, user.id);
+        }
+    };
+    
+    useEffect(() => {
+        if (!currentUser) return;
+        
+        const channelFilter = currentUser.role === 'admin' && selectedChatUser ? selectedChatUser.id : currentUser.id;
+        const chatChannel = supabase.channel(`chat_${channelFilter}`)
+            .on<ChatMessage>(
+                'postgres_changes', 
+                { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `recipient_id=eq.${currentUser.id}` }, 
+                (payload) => {
+                    const newMessage = payload.new;
+                    const isForCurrentAdminChat = currentUser.role === 'admin' && selectedChatUser && newMessage.sender_id === selectedChatUser.id;
+                    const isForCurrentUser = currentUser.role === 'user';
+                    if (isForCurrentAdminChat || isForCurrentUser) {
+                        setChatMessages(prev => [...prev, newMessage]);
+                    }
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(chatChannel);
+        };
+    }, [currentUser, selectedChatUser]);
+    
+    useEffect(() => {
+        const loadInitialChatData = async () => {
+            if (currentPage === 'support' && currentUser) {
+                if (currentUser.role === 'admin') {
+                    fetchConversations();
+                } else {
+                    const adminId = await findAdminId();
+                    if (adminId) {
+                        fetchChatMessages(currentUser.id, adminId);
+                    }
+                }
+            }
+        };
+        loadInitialChatData();
+    }, [currentPage, currentUser, fetchConversations, fetchChatMessages]);
+
+    // --- END CHAT FUNCTIONS ---
 
     const handleLogout = async () => {
         sessionStorage.clear();
@@ -2776,6 +3082,13 @@ const App: React.FC = () => {
                             fetchAdminData={fetchAdminData}
                             handleGetInquirySuggestion={handleGetInquirySuggestion}
                             handleGetFollowUpSuggestion={handleGetFollowUpSuggestion}
+                            // Chat Props
+                            chatConversations={chatConversations}
+                            selectedChatUser={selectedChatUser}
+                            handleSelectChatUser={handleSelectChatUser}
+                            chatMessages={chatMessages}
+                            handleSendMessage={handleSendMessage}
+                            isSendingMessage={isSendingMessage}
                         />
                     </main>
                     {isAnnouncementModalOpen && activeAnnouncement && (
