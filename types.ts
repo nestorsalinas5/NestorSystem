@@ -113,5 +113,14 @@ export interface Budget {
   created_at: string;
 }
 
+export interface ChatMessage {
+  id: string; // uuid
+  created_at: string;
+  sender_id: string;
+  recipient_id: string;
+  content: string;
+  is_read: boolean;
+}
+
 // FIX: Added 'inquiries' and 'activityLog' to the Page type to resolve assignment errors.
-export type Page = 'dashboard' | 'events' | 'clients' | 'agenda' | 'reports' | 'settings' | 'userManagement' | 'announcements' | 'sendNotification' | 'budgets' | 'inquiries' | 'activityLog' | 'coach';
+export type Page = 'dashboard' | 'events' | 'clients' | 'agenda' | 'reports' | 'settings' | 'userManagement' | 'announcements' | 'sendNotification' | 'budgets' | 'inquiries' | 'activityLog' | 'coach' | 'support';
