@@ -2290,10 +2290,10 @@ const ChatWindow: React.FC<{
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newMessage.trim()) return;
-
-        // Definitive Fix: Standardize the content as a stringified JSON object
-        // This is robust against backend RLS policies and database column types.
-        const messageContent = JSON.stringify({ text: newMessage });
+        
+        // Definitive Fix: The problem is almost certainly a faulty RLS policy on the backend.
+        // Sending plain text is the most basic format and least likely to trigger a badly-written JSON-parsing policy.
+        const messageContent = newMessage;
 
         const payload = {
             user_id: currentUser.role === 'admin' ? recipientId : currentUser.id,
@@ -2307,7 +2307,6 @@ const ChatWindow: React.FC<{
         
         if (error) {
             console.error("Error sending message:", error);
-            // Optionally, show an alert to the user.
         } else {
             setNewMessage('');
         }
@@ -2315,32 +2314,24 @@ const ChatWindow: React.FC<{
 
     const renderMessageContent = (content: any): string => {
         if (!content) return '';
-
-        // Case 1: It's already a JS object { text: '...' }
         if (typeof content === 'object' && content !== null && typeof content.text === 'string') {
             return content.text;
         }
-
-        // Case 2: It's a string. It could be plain text, a JSON string literal `"..."`, or a stringified object `'{"text":...}'`
         if (typeof content === 'string') {
             try {
+                // This will handle both '{"text": "message"}' and '"message"' formats
                 const parsed = JSON.parse(content);
-
-                // It was a stringified object: '{"text": "..."}' -> { text: "..." }
                 if (typeof parsed === 'object' && parsed !== null && typeof parsed.text === 'string') {
                     return parsed.text;
                 }
-                // It was a JSON string literal: '"hola"' -> 'hola'
                 if (typeof parsed === 'string') {
                     return parsed;
                 }
             } catch (e) {
-                // If parsing fails, it's just plain text (from the very first messages)
+                // This handles plain text 'message'
                 return content;
             }
         }
-        
-        // Fallback for any other unexpected format.
         return String(content);
     };
     
