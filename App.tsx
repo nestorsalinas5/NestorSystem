@@ -2291,10 +2291,13 @@ const ChatWindow: React.FC<{
         e.preventDefault();
         if (!newMessage.trim()) return;
 
+        // Definitive Fix: Send a JSON object to match the jsonb column type in Supabase.
+        const messageContent = { text: newMessage };
+
         const payload = {
             user_id: currentUser.role === 'admin' ? recipientId : currentUser.id,
             sender_is_admin: currentUser.role === 'admin',
-            content: newMessage, // Send as plain text
+            content: messageContent,
             is_read_by_admin: currentUser.role === 'admin',
             is_read_by_user: currentUser.role !== 'admin'
         };
@@ -2303,22 +2306,25 @@ const ChatWindow: React.FC<{
         
         if (error) {
             console.error("Error sending message:", error);
+            // Optionally, show an alert to the user.
         } else {
             setNewMessage('');
         }
     };
 
     const renderMessageContent = (content: any): string => {
-        // Handles new plain text format
-        if (typeof content === 'string') {
-            return content;
-        }
-        // Handles legacy object format: { text: "message" }
+        // Case 1: The content is a JS object with a 'text' property. This is the new, correct format.
         if (typeof content === 'object' && content !== null && typeof content.text === 'string') {
             return content.text;
         }
-        // Fallback for unexpected types
-        return '';
+
+        // Case 2: The content is a string. This handles old messages that were stored as plain text in the jsonb column.
+        if (typeof content === 'string') {
+            return content;
+        }
+
+        // Fallback for any other unexpected format.
+        return '[Mensaje no válido]';
     };
     
     return (
