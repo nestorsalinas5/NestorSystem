@@ -305,14 +305,17 @@ const AuthScreen: React.FC<{ showAlert: (message: string, type: 'success' | 'err
 
 const AlertModal: React.FC<{ alertState: AlertState; onClose: () => void; }> = ({ alertState, onClose }) => {
     if (!alertState.isOpen) return null;
+    const isSqlScript = alertState.message.includes('SQL');
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4">
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-sm text-center">
+            <div className={`bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full ${isSqlScript ? 'max-w-2xl' : 'max-w-sm text-center'}`}>
                 <div className="flex justify-center mb-4">
                     {alertState.type === 'success' ? <SuccessIcon /> : <ErrorIcon />}
                 </div>
-                <p className="text-lg mb-6 text-gray-700 dark:text-gray-300">{alertState.message}</p>
+                <div className={`mb-6 text-gray-700 dark:text-gray-300 ${isSqlScript ? 'text-sm text-left bg-gray-100 dark:bg-gray-900 p-4 rounded-md font-mono' : 'text-lg'}`}>
+                    <pre className="whitespace-pre-wrap break-words">{alertState.message}</pre>
+                </div>
                 <button onClick={onClose} className="w-full px-4 py-2 rounded bg-primary-600 text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500">
                     Aceptar
                 </button>
@@ -320,6 +323,7 @@ const AlertModal: React.FC<{ alertState: AlertState; onClose: () => void; }> = (
         </div>
     );
 };
+
 
 const AiSuggestionModal: React.FC<{
     title: string;
@@ -754,7 +758,7 @@ const PageContent: React.FC<{
                         deleteBudget={props.deleteBudget} 
                         showAlert={props.showAlert}
                         isModalOpen={props.isBudgetModalOpen}
-                        setIsModalOpen={props.setIsBudgetModalOpen}
+                        setIsModalOpen={props.setIsModalOpen}
                         selectedBudget={props.selectedBudget}
                         setSelectedBudget={props.setSelectedBudget}
                         onGetSuggestion={props.handleGetFollowUpSuggestion}
@@ -2197,13 +2201,11 @@ const ChatWindow: React.FC<{
         e.preventDefault();
         if (!newMessage.trim()) return;
 
-        // Definitive fix: Send content as a stringified JSON object to satisfy the faulty RLS policy.
-        const contentPayload = JSON.stringify({ text: newMessage });
-
+        // Simplest, most robust payload assuming the DB column is 'text'.
         const payload = {
             user_id: currentUser.role === 'admin' ? recipientId : currentUser.id,
             sender_is_admin: currentUser.role === 'admin',
-            content: contentPayload, // Send the compatible payload
+            content: newMessage, // Send plain text.
             is_read_by_admin: currentUser.role === 'admin',
             is_read_by_user: currentUser.role !== 'admin'
         };
@@ -2212,9 +2214,38 @@ const ChatWindow: React.FC<{
 
         if (error) {
             console.error("Error sending message:", error);
-            // Provide a more specific error message if the RLS is the cause.
-            if (error.code === '22P02') {
-                 showAlert("Error de base de datos: La política de seguridad (RLS) en Supabase está mal configurada y rechaza los mensajes. Por favor, pida al administrador que ejecute el script SQL de reparación.", 'error');
+            // Intelligent Error Handling: Detect the specific RLS error.
+            if (error.code === '22P02' || (error.message && error.message.includes('invalid input syntax for type json'))) {
+                 const isCurrentUserAdmin = currentUser.role === 'admin';
+                 
+                 const adminErrorMessage = `Error de Base de Datos (RLS):
+La política de seguridad para usuarios está mal configurada y rechaza sus mensajes.
+Para repararla, ejecuta el siguiente script COMPLETO en tu Editor SQL de Supabase:
+
+-- *** SCRIPT DE REPARACIÓN DEFINITIVO ***
+-- PASO 1: Desactiva RLS para borrar sin problemas.
+ALTER TABLE public.chat_messages DISABLE ROW LEVEL SECURITY;
+-- PASO 2: Borra TODAS las políticas antiguas.
+DO $$
+DECLARE
+    policy_name TEXT;
+BEGIN
+    FOR policy_name IN (SELECT policyname FROM pg_policies WHERE tablename = 'chat_messages' AND schemaname = 'public')
+    LOOP
+        EXECUTE 'DROP POLICY IF EXISTS "' || policy_name || '" ON public.chat_messages;';
+    END LOOP;
+END $$;
+-- PASO 3: Crea las políticas CORRECTAS.
+CREATE POLICY "1. [Admins] Acceso Total" ON public.chat_messages FOR ALL TO authenticated USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin') WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
+CREATE POLICY "2. [Usuarios] Pueden LEER sus propios mensajes" ON public.chat_messages FOR SELECT TO authenticated USING (auth.uid() = user_id);
+CREATE POLICY "3. [Usuarios] Pueden CREAR sus propios mensajes" ON public.chat_messages FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id AND sender_is_admin = false);
+-- PASO 4: Reactiva RLS.
+ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;`;
+
+                 const userErrorMessage = "Error de base de datos: La política de seguridad (RLS) en Supabase está mal configurada y rechaza los mensajes. Por favor, pida al administrador que ejecute el script SQL de reparación.";
+                 
+                 showAlert(isCurrentUserAdmin ? adminErrorMessage : userErrorMessage, 'error');
+
             } else {
                 showAlert(`Error al enviar mensaje: ${error.message}`, 'error');
             }
