@@ -2198,10 +2198,14 @@ const ChatWindow: React.FC<{
         e.preventDefault();
         if (!newMessage.trim()) return;
 
+        // The payload needs to be a string that is a valid JSON object
+        // to pass the faulty RLS policy on the user's Supabase instance.
+        const contentPayload = JSON.stringify({ text: newMessage });
+
         const payload = {
             user_id: currentUser.role === 'admin' ? recipientId : currentUser.id,
             sender_is_admin: currentUser.role === 'admin',
-            content: newMessage, // Simplificado a texto plano
+            content: contentPayload,
             is_read_by_admin: currentUser.role === 'admin',
             is_read_by_user: currentUser.role !== 'admin'
         };
@@ -2215,20 +2219,27 @@ const ChatWindow: React.FC<{
             setNewMessage('');
         }
     };
-
+    
     const renderMessageContent = (content: any): string => {
         if (!content) return '';
         if (typeof content === 'string') {
             try {
+                // First, try parsing it as a JSON string.
                 const parsed = JSON.parse(content);
+                // If it's an object with a 'text' property, return that.
                 if (typeof parsed === 'object' && parsed !== null && typeof parsed.text === 'string') {
-                    return parsed.text; // Maneja formato {"text": "mensaje"}
+                    return parsed.text;
                 }
-                return parsed; // Maneja formato "mensaje" (texto JSON)
+                // If it's a string that was inside JSON (e.g., JSON.parse('"test"')), return the string.
+                if (typeof parsed === 'string') {
+                    return parsed;
+                }
             } catch (e) {
-                return content; // Es texto plano
+                // If parsing fails, it's just a plain string.
+                return content;
             }
         }
+        // Fallback for non-string types, though unlikely.
         return String(content);
     };
     
