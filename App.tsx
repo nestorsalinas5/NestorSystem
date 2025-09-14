@@ -15,16 +15,17 @@ import { createClient, AuthSession } from '@supabase/supabase-js';
 import { GoogleGenAI, Chat } from "@google/genai";
 
 // --- SUPABASE CLIENT ---
-const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env?.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error("Supabase URL and Anon Key must be provided in environment variables.");
+  console.error("Supabase URL and Anon Key must be provided in environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY).");
 }
 export const supabase = createClient(supabaseUrl!, supabaseAnonKey!);
 
 // --- GEMINI AI CLIENT ---
-const ai = process.env.API_KEY ? new GoogleGenAI({ apiKey: process.env.API_KEY }) : null;
+const apiKey = import.meta.env.VITE_API_KEY;
+const ai = apiKey ? new GoogleGenAI({ apiKey: apiKey }) : null;
 
 
 // --- TYPES ---
@@ -2124,7 +2125,7 @@ const CoachPage: React.FC = () => {
             <div className="p-6 bg-white dark:bg-gray-800 rounded-lg shadow text-center border-l-4 border-yellow-500">
                 <h3 className="text-lg font-semibold text-yellow-800 dark:text-yellow-300">Función de IA No Disponible</h3>
                 <p className="mt-2 text-gray-600 dark:text-gray-400">
-                    La funcionalidad del Coach IA no está disponible. Para activarla, el administrador del sistema debe configurar la variable de entorno `API_KEY` de Google Gemini.
+                    La funcionalidad del Coach IA no está disponible. Para activarla, el administrador del sistema debe configurar la variable de entorno `VITE_API_KEY` de Google Gemini.
                 </p>
             </div>
         );
