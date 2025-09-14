@@ -2565,7 +2565,7 @@ const App: React.FC = () => {
     const fetchChatMessages = useCallback(async (userId1: string, userId2: string) => {
         const { data, error } = await supabase.from('chat_messages')
             .select('*')
-            .or(`(sender_id.eq.${userId1},recipient_id.eq.${userId2}),(sender_id.eq.${userId2},recipient_id.eq.${userId1})`)
+            .or(`and(sender_id.eq.${userId1},recipient_id.eq.${userId2}),and(sender_id.eq.${userId2},recipient_id.eq.${userId1})`)
             .order('created_at', { ascending: true });
         if (error) {
             showAlert('Error al cargar mensajes: ' + error.message);
