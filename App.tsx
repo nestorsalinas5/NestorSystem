@@ -305,16 +305,15 @@ const AuthScreen: React.FC<{ showAlert: (message: string, type: 'success' | 'err
 
 const AlertModal: React.FC<{ alertState: AlertState; onClose: () => void; }> = ({ alertState, onClose }) => {
     if (!alertState.isOpen) return null;
-    const isSqlScript = alertState.message.includes('SQL');
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4">
-            <div className={`bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full ${isSqlScript ? 'max-w-2xl' : 'max-w-sm text-center'}`}>
+            <div className={`bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-sm text-center`}>
                 <div className="flex justify-center mb-4">
                     {alertState.type === 'success' ? <SuccessIcon /> : <ErrorIcon />}
                 </div>
-                <div className={`mb-6 text-gray-700 dark:text-gray-300 ${isSqlScript ? 'text-sm text-left bg-gray-100 dark:bg-gray-900 p-4 rounded-md font-mono' : 'text-lg'}`}>
-                    <pre className="whitespace-pre-wrap break-words">{alertState.message}</pre>
+                <div className={`mb-6 text-gray-700 dark:text-gray-300 text-lg`}>
+                    <p className="whitespace-pre-wrap break-words">{alertState.message}</p>
                 </div>
                 <button onClick={onClose} className="w-full px-4 py-2 rounded bg-primary-600 text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500">
                     Aceptar
@@ -2204,7 +2203,7 @@ const ChatWindow: React.FC<{
         const payload = {
             user_id: currentUser.role === 'admin' ? recipientId : currentUser.id,
             sender_is_admin: currentUser.role === 'admin',
-            content: newMessage, // Send plain text as it's the most robust format.
+            content: newMessage, // Definitive: Send plain text. This is correct if the backend is fixed.
             is_read_by_admin: currentUser.role === 'admin',
             is_read_by_user: currentUser.role !== 'admin'
         };
@@ -2214,54 +2213,11 @@ const ChatWindow: React.FC<{
         if (error) {
             console.error("Error sending message:", error);
             // This error almost certainly means the RLS policy is misconfigured for non-admin users.
-            if (error.code === '22P02' || (error.message && error.message.includes('invalid input syntax for type json'))) {
-                 
-                 const repairSqlScript = `-- *** SCRIPT DEFINITIVO Y CORREGIDO PARA REPARAR LA SEGURIDAD DEL CHAT ***
--- Este script BORRA TODAS las políticas de la tabla 'chat_messages' y crea las correctas.
+            const isRlsError = error.message.includes('security policy') || error.message.includes('RLS') || error.code === '22P02';
 
--- PASO 1: Desactivar temporalmente RLS para poder borrar todo sin problemas.
-ALTER TABLE public.chat_messages DISABLE ROW LEVEL SECURITY;
-
--- PASO 2: Borrar CUALQUIER política existente para evitar conflictos.
--- CORREGIDO: Se usa "policyname" en lugar de "polname".
-DO $$
-DECLARE
-    policy_name TEXT;
-BEGIN
-    FOR policy_name IN (SELECT policyname FROM pg_policies WHERE tablename = 'chat_messages' AND schemaname = 'public')
-    LOOP
-        EXECUTE 'DROP POLICY IF EXISTS "' || policy_name || '" ON public.chat_messages;';
-    END LOOP;
-END $$;
-
--- PASO 3: Crear las políticas CORRECTAS y SEGURAS desde cero.
-
--- POLÍTICA #1: Permite a los administradores hacer de TODO (leer, escribir, etc.).
-CREATE POLICY "1. [Admins] Acceso Total"
-ON public.chat_messages FOR ALL TO authenticated
-USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin')
-WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
-
--- POLÍTICA #2: Permite a los usuarios LEER (SELECT) solo los mensajes de su propio chat.
-CREATE POLICY "2. [Usuarios] Pueden LEER sus propios mensajes"
-ON public.chat_messages FOR SELECT TO authenticated
-USING (auth.uid() = user_id);
-
--- POLÍTICA #3: Permite a los usuarios CREAR (INSERT) mensajes solo en su propio chat.
--- ¡ESTA ES LA CORRECCIÓN CLAVE! No revisa la columna 'content', evitando el error.
-CREATE POLICY "3. [Usuarios] Pueden CREAR sus propios mensajes"
-ON public.chat_messages FOR INSERT TO authenticated
-WITH CHECK (auth.uid() = user_id AND sender_is_admin = false);
-
--- PASO 4: Reactivar RLS con las nuevas políticas correctas.
-ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;`;
-                 
-                 const errorMessage = currentUser.role === 'admin' 
-                    ? `Error de Base de Datos (RLS Detectado):\nLa política de seguridad para usuarios está mal configurada y rechaza sus mensajes.\n\nPara repararla, ejecuta el siguiente script COMPLETO en tu Editor SQL de Supabase:\n\n${repairSqlScript}`
-                    : "Error de base de datos: La política de seguridad (RLS) en Supabase está mal configurada y rechaza los mensajes. Por favor, pida al administrador que ejecute el script SQL de reparación.";
-
+            if (isRlsError) {
+                 const errorMessage = "Error de base de datos: La política de seguridad (RLS) en Supabase está mal configurada y rechaza los mensajes. Por favor, pida al administrador que ejecute el script SQL de reparación.";
                  showAlert(errorMessage, 'error');
-
             } else {
                 showAlert(`Error al enviar mensaje: ${error.message}`, 'error');
             }
@@ -2271,14 +2227,18 @@ ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;`;
     };
     
     const renderMessageContent = (content: any): string => {
+        // This function robustly cleans up all historical message formats.
         if (typeof content !== 'string') return '';
         try {
+            // Attempt to parse content that might be a JSON string (e.g., '{"text":"hello"}')
             const parsed = JSON.parse(content);
             if (typeof parsed === 'object' && parsed !== null && typeof parsed.text === 'string') {
                 return parsed.text;
             }
+             // If it parses but isn't the expected object, stringify it (e.g., '"test"' becomes 'test')
             return String(parsed); 
         } catch (e) {
+            // If it's not a valid JSON string, it's plain text. Return as is.
             return content;
         }
     };
