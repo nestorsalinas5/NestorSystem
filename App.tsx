@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats, ChatMessage } from './types';
 import { getDashboardInsights, getInquiryReplySuggestion, getFollowUpEmailSuggestion, getBudgetItemsSuggestion } from './services/geminiService';
@@ -2604,26 +2605,41 @@ const App: React.FC = () => {
 
     const handleSendMessage = async (content: string, recipientId?: string) => {
         if (!currentUser) return;
-        setIsSendingMessage(true);
+
         const adminId = await findAdminId();
-        if (!adminId) {
+        if (!adminId && currentUser.role !== 'admin') {
             showAlert('No se pudo encontrar al administrador del sistema.');
-            setIsSendingMessage(false);
             return;
         }
 
-        const message: Omit<ChatMessage, 'id' | 'created_at' | 'is_read'> = {
+        const determinedRecipientId = currentUser.role === 'admin' ? recipientId! : adminId!;
+        
+        // Optimistic update
+        const optimisticMessage: ChatMessage = {
+            id: `temp-${Date.now()}`,
+            created_at: new Date().toISOString(),
+            sender_id: currentUser.id,
+            recipient_id: determinedRecipientId,
+            content: content,
+            is_read: false,
+        };
+        setChatMessages(prev => [...prev, optimisticMessage]);
+
+        // Send to database
+        const messageToInsert: Omit<ChatMessage, 'id' | 'created_at' | 'is_read'> = {
             content,
             sender_id: currentUser.id,
-            recipient_id: currentUser.role === 'admin' ? recipientId! : adminId,
+            recipient_id: determinedRecipientId,
         };
-
-        const { error } = await supabase.from('chat_messages').insert(message);
-        setIsSendingMessage(false);
+        
+        const { error } = await supabase.from('chat_messages').insert(messageToInsert);
 
         if (error) {
             showAlert('Error al enviar mensaje: ' + error.message);
+            // Revert optimistic update on error
+            setChatMessages(prev => prev.filter(msg => msg.id !== optimisticMessage.id));
         } else if (currentUser.role !== 'admin') {
+            // Trigger notification for admin
             await supabase.functions.invoke('send-chat-notification', {
                 body: { senderId: currentUser.id, message: content }
             });
@@ -2649,8 +2665,15 @@ const App: React.FC = () => {
                     const newMessage = payload.new;
                     const isForCurrentAdminChat = currentUser.role === 'admin' && selectedChatUser && newMessage.sender_id === selectedChatUser.id;
                     const isForCurrentUser = currentUser.role === 'user';
+                    
                     if (isForCurrentAdminChat || isForCurrentUser) {
-                        setChatMessages(prev => [...prev, newMessage]);
+                        // Prevent adding duplicate if it was optimistically added
+                         setChatMessages(prev => {
+                            if (prev.some(msg => msg.id === newMessage.id)) {
+                                return prev;
+                            }
+                            return [...prev, newMessage];
+                        });
                     }
                 }
             )
