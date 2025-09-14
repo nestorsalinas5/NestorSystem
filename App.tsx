@@ -357,7 +357,8 @@ const Sidebar: React.FC<{
     handleLogout: () => void;
     isOpen: boolean;
     setIsOpen: (isOpen: boolean) => void;
-}> = ({ currentPage, setCurrentPage, currentUser, handleLogout, isOpen, setIsOpen }) => {
+    unreadSupportCount: number;
+}> = ({ currentPage, setCurrentPage, currentUser, handleLogout, isOpen, setIsOpen, unreadSupportCount }) => {
     const navItems = useMemo(() => {
         let items: { page: Page; label: string; icon: React.ReactNode }[] = [
             { page: 'dashboard', label: 'Dashboard', icon: <DashboardIcon /> },
@@ -402,6 +403,11 @@ const Sidebar: React.FC<{
         >
             {icon}
             <span className="ml-3 font-medium">{label}</span>
+            {page === 'support' && unreadSupportCount > 0 && (
+                <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
+                    {unreadSupportCount}
+                </span>
+            )}
         </a>
     );
 
@@ -2373,6 +2379,7 @@ const App: React.FC = () => {
     const [chatConversations, setChatConversations] = useState<User[]>([]);
     const [selectedChatUser, setSelectedChatUser] = useState<User | null>(null);
     const [isSendingMessage, setIsSendingMessage] = useState(false);
+    const [unreadSupportCount, setUnreadSupportCount] = useState(0);
     const adminIdRef = useRef<string | null>(null);
 
     // --- ROUTING ---
@@ -2535,21 +2542,37 @@ const App: React.FC = () => {
 
     }, []);
 
+    const fetchUnreadCount = useCallback(async (userId: string) => {
+        const { count, error } = await supabase
+            .from('chat_messages')
+            .select('*', { count: 'exact', head: true })
+            .eq('recipient_id', userId)
+            .eq('is_read', false);
+        
+        if (error) {
+            console.error("Error fetching unread count:", error.message);
+        } else {
+            setUnreadSupportCount(count || 0);
+        }
+    }, []);
+
     useEffect(() => {
         if (!currentUser) return;
         const fetchData = async () => {
             setLoading(true);
-            if (currentUser.role === 'admin') await fetchAdminData();
-            else {
+            if (currentUser.role === 'admin') {
+                await fetchAdminData();
+            } else {
                 await fetchUserData(currentUser.id);
                 await fetchClients(currentUser.id);
                 await fetchBudgets(currentUser.id);
                 await fetchInquiries(currentUser.id);
             }
+            await fetchUnreadCount(currentUser.id);
             setLoading(false);
         };
         fetchData();
-    }, [currentUser, fetchAdminData, fetchUserData, fetchClients, fetchBudgets, fetchInquiries]);
+    }, [currentUser, fetchAdminData, fetchUserData, fetchClients, fetchBudgets, fetchInquiries, fetchUnreadCount]);
     
     // --- CHAT FUNCTIONS ---
     const findAdminId = async () => {
@@ -2602,6 +2625,21 @@ const App: React.FC = () => {
             setChatConversations(profiles as User[] || []);
         }
     }, [currentUser]);
+    
+    const markMessagesAsRead = useCallback(async (senderId: string) => {
+        if (!currentUser) return;
+        const { error } = await supabase
+            .from('chat_messages')
+            .update({ is_read: true })
+            .eq('recipient_id', currentUser.id)
+            .eq('sender_id', senderId);
+
+        if (error) {
+            console.error("Error marking messages as read:", error.message);
+        } else {
+            await fetchUnreadCount(currentUser.id);
+        }
+    }, [currentUser, fetchUnreadCount]);
 
     const handleSendMessage = async (content: string, recipientId?: string) => {
         if (!currentUser) return;
@@ -2614,7 +2652,6 @@ const App: React.FC = () => {
 
         const determinedRecipientId = currentUser.role === 'admin' ? recipientId! : adminId!;
         
-        // Optimistic update
         const optimisticMessage: ChatMessage = {
             id: `temp-${Date.now()}`,
             created_at: new Date().toISOString(),
@@ -2625,7 +2662,6 @@ const App: React.FC = () => {
         };
         setChatMessages(prev => [...prev, optimisticMessage]);
 
-        // Send to database
         const messageToInsert: Omit<ChatMessage, 'id' | 'created_at' | 'is_read'> = {
             content,
             sender_id: currentUser.id,
@@ -2636,44 +2672,49 @@ const App: React.FC = () => {
 
         if (error) {
             showAlert('Error al enviar mensaje: ' + error.message);
-            // Revert optimistic update on error
             setChatMessages(prev => prev.filter(msg => msg.id !== optimisticMessage.id));
         } else if (currentUser.role !== 'admin') {
-            // Trigger notification for admin
             await supabase.functions.invoke('send-chat-notification', {
                 body: { senderId: currentUser.id, message: content }
             });
         }
     };
     
-    const handleSelectChatUser = (user: User) => {
+    const handleSelectChatUser = useCallback((user: User) => {
         setSelectedChatUser(user);
         if (currentUser) {
             fetchChatMessages(currentUser.id, user.id);
+            markMessagesAsRead(user.id);
         }
-    };
+    }, [currentUser, fetchChatMessages, markMessagesAsRead]);
     
     useEffect(() => {
         if (!currentUser) return;
         
-        const channelFilter = currentUser.role === 'admin' && selectedChatUser ? selectedChatUser.id : currentUser.id;
-        const chatChannel = supabase.channel(`chat_${channelFilter}`)
+        const chatChannel = supabase.channel(`chat_for_${currentUser.id}`)
             .on<ChatMessage>(
                 'postgres_changes', 
                 { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `recipient_id=eq.${currentUser.id}` }, 
                 (payload) => {
                     const newMessage = payload.new;
-                    const isForCurrentAdminChat = currentUser.role === 'admin' && selectedChatUser && newMessage.sender_id === selectedChatUser.id;
-                    const isForCurrentUser = currentUser.role === 'user';
-                    
-                    if (isForCurrentAdminChat || isForCurrentUser) {
-                        // Prevent adding duplicate if it was optimistically added
-                         setChatMessages(prev => {
-                            if (prev.some(msg => msg.id === newMessage.id)) {
-                                return prev;
-                            }
-                            return [...prev, newMessage];
-                        });
+                     setChatMessages(prev => {
+                        if (prev.some(msg => msg.id === newMessage.id)) return prev;
+                        return [...prev, newMessage];
+                    });
+
+                    let isChatVisible = false;
+                    if (currentPage === 'support') {
+                        if (currentUser.role === 'user') {
+                            isChatVisible = true;
+                        } else if (currentUser.role === 'admin' && selectedChatUser?.id === newMessage.sender_id) {
+                            isChatVisible = true;
+                        }
+                    }
+
+                    if (!isChatVisible) {
+                        setUnreadSupportCount(prev => prev + 1);
+                    } else {
+                        markMessagesAsRead(newMessage.sender_id);
                     }
                 }
             )
@@ -2682,23 +2723,28 @@ const App: React.FC = () => {
         return () => {
             supabase.removeChannel(chatChannel);
         };
-    }, [currentUser, selectedChatUser]);
+    }, [currentUser, currentPage, selectedChatUser, markMessagesAsRead]);
     
     useEffect(() => {
         const loadInitialChatData = async () => {
             if (currentPage === 'support' && currentUser) {
                 if (currentUser.role === 'admin') {
-                    fetchConversations();
+                    await fetchConversations();
+                    // Mark messages as read for the currently selected conversation
+                    if (selectedChatUser) {
+                        await markMessagesAsRead(selectedChatUser.id);
+                    }
                 } else {
                     const adminId = await findAdminId();
                     if (adminId) {
-                        fetchChatMessages(currentUser.id, adminId);
+                        await fetchChatMessages(currentUser.id, adminId);
+                        await markMessagesAsRead(adminId);
                     }
                 }
             }
         };
         loadInitialChatData();
-    }, [currentPage, currentUser, fetchConversations, fetchChatMessages]);
+    }, [currentPage, currentUser, fetchConversations, fetchChatMessages, markMessagesAsRead, selectedChatUser]);
 
     // --- END CHAT FUNCTIONS ---
 
@@ -3058,6 +3104,7 @@ const App: React.FC = () => {
                         handleLogout={handleLogout}
                         isOpen={isSidebarOpen}
                         setIsOpen={setIsSidebarOpen}
+                        unreadSupportCount={unreadSupportCount}
                     />
                     <main className="flex-1 p-4 md:p-6 overflow-y-auto">
                         <Header
