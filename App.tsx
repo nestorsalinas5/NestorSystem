@@ -722,8 +722,8 @@ const PageContent: React.FC<{
     sendNotificationToAll: (message: string) => Promise<void>;
     fetchInquiries: (userId: string) => Promise<void>;
     convertInquiryToBudget: (inquiry: Inquiry) => Promise<void>;
-    isBudgetModalOpen: boolean;
-    setIsBudgetModalOpen: (isOpen: boolean) => void;
+    isModalOpen: boolean;
+    setIsModalOpen: (isOpen: boolean) => void;
     selectedBudget: Budget | null;
     setSelectedBudget: (budget: Budget | null) => void;
     adminStats: AdminDashboardStats | null;
@@ -757,7 +757,7 @@ const PageContent: React.FC<{
                         saveBudget={props.saveBudget} 
                         deleteBudget={props.deleteBudget} 
                         showAlert={props.showAlert}
-                        isModalOpen={props.isBudgetModalOpen}
+                        isModalOpen={props.isModalOpen}
                         setIsModalOpen={props.setIsModalOpen}
                         selectedBudget={props.selectedBudget}
                         setSelectedBudget={props.setSelectedBudget}
@@ -3052,8 +3052,8 @@ const App: React.FC = () => {
                             sendNotificationToAll={sendNotificationToAll}
                             fetchInquiries={fetchInquiries}
                             convertInquiryToBudget={convertInquiryToBudget}
-                            isBudgetModalOpen={isBudgetModalOpen}
-                            setIsBudgetModalOpen={setIsBudgetModalOpen}
+                            isModalOpen={isBudgetModalOpen}
+                            setIsModalOpen={setIsBudgetModalOpen}
                             selectedBudget={selectedBudget}
                             setSelectedBudget={setSelectedBudget}
                             adminStats={adminStats}
