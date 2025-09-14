@@ -2291,8 +2291,9 @@ const ChatWindow: React.FC<{
         e.preventDefault();
         if (!newMessage.trim()) return;
 
-        // Definitive Fix: Send a JSON object to match the jsonb column type in Supabase.
-        const messageContent = { text: newMessage };
+        // Definitive Fix: Standardize the content as a stringified JSON object
+        // This is robust against backend RLS policies and database column types.
+        const messageContent = JSON.stringify({ text: newMessage });
 
         const payload = {
             user_id: currentUser.role === 'admin' ? recipientId : currentUser.id,
@@ -2313,18 +2314,34 @@ const ChatWindow: React.FC<{
     };
 
     const renderMessageContent = (content: any): string => {
-        // Case 1: The content is a JS object with a 'text' property. This is the new, correct format.
+        if (!content) return '';
+
+        // Case 1: It's already a JS object { text: '...' }
         if (typeof content === 'object' && content !== null && typeof content.text === 'string') {
             return content.text;
         }
 
-        // Case 2: The content is a string. This handles old messages that were stored as plain text in the jsonb column.
+        // Case 2: It's a string. It could be plain text, a JSON string literal `"..."`, or a stringified object `'{"text":...}'`
         if (typeof content === 'string') {
-            return content;
-        }
+            try {
+                const parsed = JSON.parse(content);
 
+                // It was a stringified object: '{"text": "..."}' -> { text: "..." }
+                if (typeof parsed === 'object' && parsed !== null && typeof parsed.text === 'string') {
+                    return parsed.text;
+                }
+                // It was a JSON string literal: '"hola"' -> 'hola'
+                if (typeof parsed === 'string') {
+                    return parsed;
+                }
+            } catch (e) {
+                // If parsing fails, it's just plain text (from the very first messages)
+                return content;
+            }
+        }
+        
         // Fallback for any other unexpected format.
-        return '[Mensaje no válido]';
+        return String(content);
     };
     
     return (
