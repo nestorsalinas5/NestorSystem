@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats, ChatMessage } from './types';
 import { getDashboardInsights, getInquiryReplySuggestion, getFollowUpEmailSuggestion, getBudgetItemsSuggestion } from './services/geminiService';
@@ -2124,8 +2123,8 @@ const CoachPage: React.FC = () => {
         } catch (error: any) {
             console.error("Error communicating with AI:", error);
             let errorMessage = "Lo siento, tuve un problema al procesar tu solicitud.";
-            const errorString = error.toString();
-            if (errorString.includes('API_KEY_INVALID') || errorString.includes('API key not valid')) {
+            const errorDetails = error.message || error.toString();
+            if (errorDetails.includes('API_KEY_INVALID') || errorDetails.includes('API key not valid')) {
                 errorMessage = "Error: La clave de API de Google Gemini no es válida o no está configurada. Por favor, contacta al administrador del sistema para que la verifique.";
             }
             setMessages(prev => {
@@ -2295,7 +2294,7 @@ const ChatWindow: React.FC<{
         const payload = {
             user_id: currentUser.role === 'admin' ? recipientId : currentUser.id,
             sender_is_admin: currentUser.role === 'admin',
-            content: { text: newMessage }, // FIX: Send as a proper JSON object
+            content: newMessage, // Send as plain text
             is_read_by_admin: currentUser.role === 'admin',
             is_read_by_user: currentUser.role !== 'admin'
         };
@@ -2310,24 +2309,13 @@ const ChatWindow: React.FC<{
     };
 
     const renderMessageContent = (content: any): string => {
-        // Handles new format: { text: "message" }
+        // Handles new plain text format
+        if (typeof content === 'string') {
+            return content;
+        }
+        // Handles legacy object format: { text: "message" }
         if (typeof content === 'object' && content !== null && typeof content.text === 'string') {
             return content.text;
-        }
-        // Handles legacy formats: "message" or "\"message\""
-        if (typeof content === 'string') {
-            try {
-                // Try to parse if it's a JSON string primitive
-                const parsed = JSON.parse(content);
-                if (typeof parsed === 'string') {
-                    return parsed;
-                }
-            } catch (e) {
-                // If parsing fails, it's just a plain string
-                return content;
-            }
-            // If it parsed to something other than a string, return original
-            return content;
         }
         // Fallback for unexpected types
         return '';
