@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats, ChatMessage } from './types';
 import { getDashboardInsights, getInquiryReplySuggestion, getFollowUpEmailSuggestion, getBudgetItemsSuggestion } from './services/geminiService';
@@ -2198,14 +2197,13 @@ const ChatWindow: React.FC<{
         e.preventDefault();
         if (!newMessage.trim()) return;
 
-        // The payload needs to be a string that is a valid JSON object
-        // to pass the faulty RLS policy on the user's Supabase instance.
+        // Definitive fix: Send content as a stringified JSON object to satisfy the faulty RLS policy.
         const contentPayload = JSON.stringify({ text: newMessage });
 
         const payload = {
             user_id: currentUser.role === 'admin' ? recipientId : currentUser.id,
             sender_is_admin: currentUser.role === 'admin',
-            content: contentPayload,
+            content: contentPayload, // Send the compatible payload
             is_read_by_admin: currentUser.role === 'admin',
             is_read_by_user: currentUser.role !== 'admin'
         };
@@ -2214,33 +2212,32 @@ const ChatWindow: React.FC<{
 
         if (error) {
             console.error("Error sending message:", error);
-            showAlert(`Error al enviar mensaje: ${error.message}`, 'error');
+            // Provide a more specific error message if the RLS is the cause.
+            if (error.code === '22P02') {
+                 showAlert("Error de base de datos: La política de seguridad (RLS) en Supabase está mal configurada y rechaza los mensajes. Por favor, pida al administrador que ejecute el script SQL de reparación.", 'error');
+            } else {
+                showAlert(`Error al enviar mensaje: ${error.message}`, 'error');
+            }
         } else {
             setNewMessage('');
         }
     };
     
+    // This robust function can parse all historical message formats.
     const renderMessageContent = (content: any): string => {
-        if (!content) return '';
-        if (typeof content === 'string') {
-            try {
-                // First, try parsing it as a JSON string.
-                const parsed = JSON.parse(content);
-                // If it's an object with a 'text' property, return that.
-                if (typeof parsed === 'object' && parsed !== null && typeof parsed.text === 'string') {
-                    return parsed.text;
-                }
-                // If it's a string that was inside JSON (e.g., JSON.parse('"test"')), return the string.
-                if (typeof parsed === 'string') {
-                    return parsed;
-                }
-            } catch (e) {
-                // If parsing fails, it's just a plain string.
-                return content;
+        if (typeof content !== 'string') return '';
+        try {
+            // Attempt to parse content that might be a JSON string like '{"text":"hello"}' or '"hello"'
+            const parsed = JSON.parse(content);
+            if (typeof parsed === 'object' && parsed !== null && typeof parsed.text === 'string') {
+                return parsed.text; // Handles {'text':'message'}
             }
+            // Handles content that was just a stringified string, like '"test"'
+            return String(parsed); 
+        } catch (e) {
+            // If it fails to parse, it's just a plain string like 'hola'
+            return content;
         }
-        // Fallback for non-string types, though unlikely.
-        return String(content);
     };
     
     return (
