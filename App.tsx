@@ -2203,7 +2203,7 @@ const ChatWindow: React.FC<{
         const payload = {
             user_id: currentUser.role === 'admin' ? recipientId : currentUser.id,
             sender_is_admin: currentUser.role === 'admin',
-            content: newMessage, // Definitive: Send plain text. This is correct if the backend is fixed.
+            content: newMessage, // Final approach: Send plain text, assuming the DB is fixed.
             is_read_by_admin: currentUser.role === 'admin',
             is_read_by_user: currentUser.role !== 'admin'
         };
@@ -2212,15 +2212,7 @@ const ChatWindow: React.FC<{
 
         if (error) {
             console.error("Error sending message:", error);
-            // This error almost certainly means the RLS policy is misconfigured for non-admin users.
-            const isRlsError = error.message.includes('security policy') || error.message.includes('RLS') || error.code === '22P02';
-
-            if (isRlsError) {
-                 const errorMessage = "Error de base de datos: La política de seguridad (RLS) en Supabase está mal configurada y rechaza los mensajes. Por favor, pida al administrador que ejecute el script SQL de reparación.";
-                 showAlert(errorMessage, 'error');
-            } else {
-                showAlert(`Error al enviar mensaje: ${error.message}`, 'error');
-            }
+            showAlert(`Error al enviar el mensaje: ${error.message}`, 'error');
         } else {
             setNewMessage('');
         }
@@ -2228,14 +2220,20 @@ const ChatWindow: React.FC<{
     
     const renderMessageContent = (content: any): string => {
         // This function robustly cleans up all historical message formats.
-        if (typeof content !== 'string') return '';
+        if (typeof content !== 'string') {
+             if(typeof content === 'object' && content !== null && 'text' in content) {
+                return String(content.text);
+            }
+            return '';
+        };
+
         try {
-            // Attempt to parse content that might be a JSON string (e.g., '{"text":"hello"}')
+            // Attempt to parse content that might be a JSON string (e.g., '{"text":"hello"}' or '"hello"')
             const parsed = JSON.parse(content);
             if (typeof parsed === 'object' && parsed !== null && typeof parsed.text === 'string') {
-                return parsed.text;
+                return parsed.text; // Handles {"text": "message"}
             }
-             // If it parses but isn't the expected object, stringify it (e.g., '"test"' becomes 'test')
+             // Handles content that was just a stringified string e.g., '"test"'
             return String(parsed); 
         } catch (e) {
             // If it's not a valid JSON string, it's plain text. Return as is.
