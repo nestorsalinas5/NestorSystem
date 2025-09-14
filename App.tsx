@@ -2108,10 +2108,10 @@ const CoachPage: React.FC<{ events: Event[], clients: Client[] }> = ({ events, c
         chatSession.current = ai.chats.create({
             model: 'gemini-2.5-flash',
             config: {
-                systemInstruction: "Eres 'Coach IA', un asistente de negocios para un organizador de eventos. El usuario te proporcionará sus datos de negocio (eventos, clientes, etc.) en formato JSON junto con su pregunta. Tu única tarea es analizar los datos proporcionados en cada mensaje para responder de forma precisa y directa a la pregunta del usuario. Basa tus respuestas exclusivamente en la información dada. Si la respuesta no está en los datos, indícalo claramente. No tienes acceso a datos históricos ni a conversaciones previas.",
+                systemInstruction: "Eres 'Coach IA', un asistente de negocios experto para organizadores de eventos. Tu doble rol es: 1) Si la pregunta del usuario se puede responder con los datos de negocio (en JSON) que te proporciona, basa tu respuesta exclusivamente en esos datos. 2) Si la pregunta es general sobre estrategias de negocio, marketing, consejos, etc., que no se encuentran en los datos, actúa como un coach experto y da consejos útiles sin mencionar que 'no encuentras la información en los datos'.",
             },
         });
-        setMessages([{ role: 'model', text: "¡Hola! Soy tu Coach de IA. Puedes preguntarme sobre tus datos de eventos y clientes para obtener análisis." }]);
+        setMessages([{ role: 'model', text: "¡Hola! Soy tu Coach de IA. Pregúntame sobre tus datos para obtener análisis o pídeme consejos para hacer crecer tu negocio." }]);
     }, []);
 
     useEffect(() => {
@@ -2150,7 +2150,7 @@ const CoachPage: React.FC<{ events: Event[], clients: Client[] }> = ({ events, c
           ${dataContext}
           \`\`\`
           
-          Basado únicamente en estos datos, responde a la siguiente pregunta: "${currentInput}"
+          Mi pregunta es: "${currentInput}"
         `;
         
         setCurrentInput('');
@@ -2702,6 +2702,7 @@ const App: React.FC = () => {
         if (error) {
             console.error("Error marking messages as read:", error.message);
         } else {
+            // After successfully marking as read, refetch the total count to ensure UI is in sync with DB
             await fetchUnreadCount(currentUser.id);
         }
     }, [currentUser, fetchUnreadCount]);
@@ -2749,10 +2750,15 @@ const App: React.FC = () => {
         setSelectedChatUser(user);
         if (currentUser) {
             fetchChatMessages(currentUser.id, user.id);
+            // Mark messages as read in the database
             markMessagesAsRead(user.id);
+            // Instantly update the UI for both individual and total counters
             setUnreadCountsByConversation(prev => {
                 const newCounts = new Map(prev);
                 newCounts.delete(user.id);
+                // Recalculate total from the map for instant feedback
+                const newTotal = Array.from(newCounts.values()).reduce((a, b) => a + b, 0);
+                setUnreadSupportCount(newTotal);
                 return newCounts;
             });
         }
@@ -2808,8 +2814,6 @@ const App: React.FC = () => {
         const onEnterSupportPage = async () => {
             if (currentPage === 'support' && currentUser) {
                 if (currentUser.role === 'admin') {
-                    // For admins, visually clear the main counter. Individual counters remain.
-                    setUnreadSupportCount(0);
                     await fetchConversations();
                 } else {
                     // For users, mark all messages as read from the admin.
