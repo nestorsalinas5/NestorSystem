@@ -2611,7 +2611,7 @@ const App: React.FC = () => {
     }, [currentUser, fetchAdminData, fetchUserData, fetchClients, fetchBudgets, fetchInquiries, fetchUnreadCount, fetchUnreadCountsByConversation]);
     
     // --- CHAT FUNCTIONS ---
-    const findAdminId = async () => {
+    const findAdminId = useCallback(async () => {
         if (adminIdRef.current) return adminIdRef.current;
         const { data, error } = await supabase.from('profiles').select('id').eq('role', 'admin').limit(1).single();
         if (error || !data) {
@@ -2620,7 +2620,7 @@ const App: React.FC = () => {
         }
         adminIdRef.current = data.id;
         return data.id;
-    };
+    }, []);
 
     const fetchChatMessages = useCallback(async (userId1: string, userId2: string) => {
         const { data, error } = await supabase.from('chat_messages')
@@ -2729,6 +2729,7 @@ const App: React.FC = () => {
         }
     }, [currentUser, fetchChatMessages, markMessagesAsRead]);
     
+    // Effect for handling real-time chat updates
     useEffect(() => {
         if (!currentUser) return;
         
@@ -2773,16 +2774,16 @@ const App: React.FC = () => {
         };
     }, [currentUser, currentPage, selectedChatUser, markMessagesAsRead]);
     
+    // Effect for handling actions when entering the support page
     useEffect(() => {
-        const loadInitialChatData = async () => {
+        const onEnterSupportPage = async () => {
             if (currentPage === 'support' && currentUser) {
                 if (currentUser.role === 'admin') {
+                    // For admins, visually clear the main counter. Individual counters remain.
+                    setUnreadSupportCount(0);
                     await fetchConversations();
-                    // Mark messages as read for the currently selected conversation
-                    if (selectedChatUser) {
-                        await markMessagesAsRead(selectedChatUser.id);
-                    }
                 } else {
+                    // For users, mark all messages as read from the admin.
                     const adminId = await findAdminId();
                     if (adminId) {
                         await fetchChatMessages(currentUser.id, adminId);
@@ -2791,8 +2792,8 @@ const App: React.FC = () => {
                 }
             }
         };
-        loadInitialChatData();
-    }, [currentPage, currentUser, fetchConversations, fetchChatMessages, markMessagesAsRead, selectedChatUser]);
+        onEnterSupportPage();
+    }, [currentPage, currentUser, fetchConversations, fetchChatMessages, markMessagesAsRead, findAdminId]);
 
     // --- END CHAT FUNCTIONS ---
 
