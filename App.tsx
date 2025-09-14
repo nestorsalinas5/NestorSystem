@@ -2290,12 +2290,11 @@ const ChatWindow: React.FC<{
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newMessage.trim()) return;
-    
-        // Definitive Fix: The column type is jsonb. The Supabase client handles serializing
-        // JS objects correctly. This is the most robust and standard way to insert.
-        // If this fails for users but not for admins, the issue is 100% a faulty RLS policy.
-        const messageContent = { text: newMessage };
-    
+
+        // Definitive Fix: Send plain text, assuming the column type in Supabase has been changed to 'text'.
+        // This avoids all jsonb-related issues and is the simplest, most robust solution.
+        const messageContent = newMessage;
+
         const payload = {
             user_id: currentUser.role === 'admin' ? recipientId : currentUser.id,
             sender_is_admin: currentUser.role === 'admin',
@@ -2303,9 +2302,9 @@ const ChatWindow: React.FC<{
             is_read_by_admin: currentUser.role === 'admin',
             is_read_by_user: currentUser.role !== 'admin'
         };
-    
+
         const { error } = await supabase.from('chat_messages').insert(payload);
-    
+
         if (error) {
             console.error("Error sending message:", error);
         } else {
@@ -2315,29 +2314,20 @@ const ChatWindow: React.FC<{
 
     const renderMessageContent = (content: any): string => {
         if (!content) return '';
-        // 1. Handles the correct format: { text: "message" }
-        if (typeof content === 'object' && content !== null && typeof content.text === 'string') {
-            return content.text;
-        }
-        // This part is for legacy data or malformed data.
+        // Handles new messages (plain text) and old messages stored as plain text.
         if (typeof content === 'string') {
             try {
-                // This will handle both '{"text": "message"}' and '"message"' formats
+                // This will handle old messages that might have been stored as '"message"'
                 const parsed = JSON.parse(content);
-                // 2. Handles stringified object: '{"text": "message"}'
-                if (typeof parsed === 'object' && parsed !== null && typeof parsed.text === 'string') {
-                    return parsed.text;
-                }
-                // 3. Handles stringified plain text: '"message"'
                 if (typeof parsed === 'string') {
                     return parsed;
                 }
             } catch (e) {
-                // 4. Handles plain text 'message' that might exist from old records
+                // If it fails to parse, it's a regular string.
                 return content;
             }
         }
-        // Fallback for any other weird format
+        // Fallback for any other legacy format.
         return String(content);
     };
     
