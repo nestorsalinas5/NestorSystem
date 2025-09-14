@@ -786,7 +786,7 @@ const PageContent: React.FC<{
         case 'activityLog':
             return <ActivityLogPage logs={props.activityLogs} />;
         case 'coach':
-            return <CoachPage />;
+            return <CoachPage events={props.events} clients={props.clients} />;
         case 'support':
             return props.currentUser.role === 'admin' ? (
                 <AdminSupportPage 
@@ -2096,7 +2096,7 @@ const PublicInquiryPage: React.FC<{ userId: string }> = ({ userId }) => {
     );
 };
 
-const CoachPage: React.FC = () => {
+const CoachPage: React.FC<{ events: Event[], clients: Client[] }> = ({ events, clients }) => {
     const [messages, setMessages] = useState<{ role: 'user' | 'model', text: string }[]>([]);
     const [currentInput, setCurrentInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -2108,10 +2108,10 @@ const CoachPage: React.FC = () => {
         chatSession.current = ai.chats.create({
             model: 'gemini-2.5-flash',
             config: {
-                systemInstruction: "Eres 'Coach IA', un experto en negocios y marketing especializado en la industria de eventos, DJs y entretenimiento. Tu objetivo es proporcionar consejos prácticos, estratégicos y accionables a los usuarios para que mejoren sus negocios. Responde de forma clara, concisa y motivadora. Puedes analizar ideas de negocio, sugerir estrategias de precios, dar consejos para captar clientes, y evaluar el impacto potencial de decisiones financieras. Evita dar consejos financieros garantizados y en su lugar, enfócate en los pros y contras y en las estrategias a considerar.",
+                systemInstruction: "Eres 'Coach IA', un asistente de negocios para un organizador de eventos. El usuario te proporcionará sus datos de negocio (eventos, clientes, etc.) en formato JSON junto con su pregunta. Tu única tarea es analizar los datos proporcionados en cada mensaje para responder de forma precisa y directa a la pregunta del usuario. Basa tus respuestas exclusivamente en la información dada. Si la respuesta no está en los datos, indícalo claramente. No tienes acceso a datos históricos ni a conversaciones previas.",
             },
         });
-        setMessages([{ role: 'model', text: "¡Hola! Soy tu Coach de IA. ¿En qué puedo ayudarte hoy para impulsar tu negocio de eventos?" }]);
+        setMessages([{ role: 'model', text: "¡Hola! Soy tu Coach de IA. Puedes preguntarme sobre tus datos de eventos y clientes para obtener análisis." }]);
     }, []);
 
     useEffect(() => {
@@ -2124,11 +2124,40 @@ const CoachPage: React.FC = () => {
 
         const userMessage = { role: 'user' as const, text: currentInput };
         setMessages(prev => [...prev, userMessage, { role: 'model' as const, text: '' }]);
+        
+        const relevantEvents = events.map(e => ({
+            nombre: e.name,
+            cliente: e.client?.name || 'N/A',
+            fecha: e.date,
+            monto_cobrado: e.amount_charged,
+            ganancia_neta: e.amount_charged - e.expenses.reduce((acc, exp) => acc + exp.amount, 0)
+        }));
+
+        const relevantClients = clients.map(c => ({
+            nombre: c.name,
+            telefono: c.phone,
+            email: c.email
+        }));
+        
+        const dataContext = JSON.stringify({
+            eventos: relevantEvents,
+            clientes: relevantClients,
+        }, null, 2);
+
+        const prompt = `
+          Aquí están mis datos de negocio actuales:
+          \`\`\`json
+          ${dataContext}
+          \`\`\`
+          
+          Basado únicamente en estos datos, responde a la siguiente pregunta: "${currentInput}"
+        `;
+        
         setCurrentInput('');
         setIsLoading(true);
 
         try {
-            const stream = await chatSession.current.sendMessageStream({ message: currentInput });
+            const stream = await chatSession.current.sendMessageStream({ message: prompt });
             let streamedText = "";
             for await (const chunk of stream) {
                 streamedText += chunk.text;
