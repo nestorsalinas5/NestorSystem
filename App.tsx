@@ -2291,8 +2291,6 @@ const ChatWindow: React.FC<{
         e.preventDefault();
         if (!newMessage.trim()) return;
 
-        // Definitive Fix: Send plain text, assuming the column type in Supabase has been changed to 'text'.
-        // This avoids all jsonb-related issues and is the simplest, most robust solution.
         const messageContent = newMessage;
 
         const payload = {
@@ -2313,23 +2311,33 @@ const ChatWindow: React.FC<{
     };
 
     const renderMessageContent = (content: any): string => {
-        if (typeof content !== 'string') {
-            return String(content?.text || content || '');
+        if (!content) return ''; // Handle null/undefined gracefully
+
+        // Case 1: It's already an object with a 'text' property from old attempts
+        if (typeof content === 'object' && content !== null && typeof content.text === 'string') {
+            return content.text;
         }
-        // This robustly handles all legacy formats ("test", {"text":"test"}) and new plain text.
-        try {
-            const parsed = JSON.parse(content);
-            if (typeof parsed === 'object' && parsed !== null && parsed.text) {
-                return String(parsed.text);
+
+        // Case 2: It's a string, which could be plain text or a JSON string from old attempts
+        if (typeof content === 'string') {
+            try {
+                const parsed = JSON.parse(content);
+                // It was a JSON string like '{"text": "hello"}'
+                if (typeof parsed === 'object' && parsed !== null && typeof parsed.text === 'string') {
+                    return parsed.text;
+                }
+                // It was a JSON string like '"hello"'
+                if (typeof parsed === 'string') {
+                    return parsed;
+                }
+            } catch (e) {
+                // It's just a plain text string. Return it as is.
+                return content;
             }
-            if (typeof parsed === 'string') {
-                return parsed;
-            }
-        } catch (e) {
-            // It's plain text, return as is.
-            return content;
         }
-        return content; // Fallback
+        
+        // Fallback for any other unexpected type
+        return String(content);
     };
     
     return (
