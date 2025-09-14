@@ -2199,17 +2199,24 @@ const ChatWindow: React.FC<{
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newMessage.trim()) return;
-
-        const payload = {
-            user_id: currentUser.role === 'admin' ? recipientId : currentUser.id,
-            sender_is_admin: currentUser.role === 'admin',
-            content: newMessage, // Final approach: Send plain text, assuming the DB is fixed.
-            is_read_by_admin: currentUser.role === 'admin',
-            is_read_by_user: currentUser.role !== 'admin'
-        };
-
-        const { error } = await supabase.from('chat_messages').insert(payload);
-
+    
+        let error;
+    
+        if (currentUser.role === 'admin') {
+            // Admin uses direct insert, as their RLS policy allows it.
+            const payload = {
+                user_id: recipientId,
+                sender_is_admin: true,
+                content: newMessage,
+                is_read_by_admin: true,
+                is_read_by_user: false
+            };
+            ({ error } = await supabase.from('chat_messages').insert(payload));
+        } else {
+            // Users use the secure RPC function to bypass faulty RLS policies.
+            ({ error } = await supabase.rpc('send_user_message', { content: newMessage }));
+        }
+    
         if (error) {
             console.error("Error sending message:", error);
             showAlert(`Error al enviar el mensaje: ${error.message}`, 'error');
@@ -2219,26 +2226,24 @@ const ChatWindow: React.FC<{
     };
     
     const renderMessageContent = (content: any): string => {
-        // This function robustly cleans up all historical message formats.
-        if (typeof content !== 'string') {
-             if(typeof content === 'object' && content !== null && 'text' in content) {
-                return String(content.text);
+        if (!content) return '';
+        if (typeof content === 'string') {
+            try {
+                // Handles content that is a JSON string, e.g., '{"text": "hello"}' or '"hello"'
+                const parsed = JSON.parse(content);
+                if (typeof parsed === 'object' && parsed !== null && parsed.text) {
+                    return String(parsed.text);
+                }
+                return String(parsed);
+            } catch (e) {
+                // If it's not valid JSON, it's plain text.
+                return content;
             }
-            return '';
-        };
-
-        try {
-            // Attempt to parse content that might be a JSON string (e.g., '{"text":"hello"}' or '"hello"')
-            const parsed = JSON.parse(content);
-            if (typeof parsed === 'object' && parsed !== null && typeof parsed.text === 'string') {
-                return parsed.text; // Handles {"text": "message"}
-            }
-             // Handles content that was just a stringified string e.g., '"test"'
-            return String(parsed); 
-        } catch (e) {
-            // If it's not a valid JSON string, it's plain text. Return as is.
-            return content;
         }
+        if (typeof content === 'object' && content !== null && content.text) {
+            return String(content.text); // Handles {text: "message"}
+        }
+        return '[Mensaje no válido]';
     };
     
     return (
