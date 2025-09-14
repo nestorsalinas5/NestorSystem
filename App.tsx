@@ -787,7 +787,7 @@ const PageContent: React.FC<{
                         chatUsers={props.chatUsers}
                         fetchChatUsers={props.fetchChatUsers}
                         chatError={props.chatError}
-                        setCurrentPage={props.setCurrentPage}
+                        showAlert={props.showAlert}
                     />;
         default:
             return <div>Página no encontrada o en construcción.</div>;
@@ -2127,6 +2127,8 @@ const CoachPage: React.FC = () => {
             const errorDetails = error.message || error.toString();
             if (errorDetails.includes('API_KEY_INVALID') || errorDetails.includes('API key not valid')) {
                 errorMessage = "Error: La clave de API de Google Gemini no es válida o no está configurada. Por favor, contacta al administrador del sistema para que la verifique.";
+            } else if (errorDetails.includes('overloaded')) {
+                errorMessage = "El modelo de IA está sobrecargado en este momento. Por favor, intenta de nuevo en unos minutos.";
             }
             setMessages(prev => {
                 const newMessages = [...prev];
@@ -2179,108 +2181,12 @@ const CoachPage: React.FC = () => {
     );
 };
 
-const SupportChatPage: React.FC<{
-    currentUser: User;
-    allMessages: ChatMessage[];
-    chatUsers: ChatUser[];
-    fetchChatUsers: () => void;
-    chatError: string | null;
-    setCurrentPage: (page: Page) => void;
-}> = ({ currentUser, allMessages, chatUsers, fetchChatUsers, chatError, setCurrentPage }) => {
-    const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-
-    const markMessagesAsRead = useCallback(async (userId: string) => {
-        if (currentUser.role === 'admin') {
-            const { error } = await supabase.from('chat_messages').update({ is_read_by_admin: true }).eq('user_id', userId).eq('is_read_by_admin', false);
-            if (error) console.error("Failed to mark messages as read for admin", error);
-            else fetchChatUsers(); // Refresh unread counts
-        } else {
-             const { error } = await supabase.from('chat_messages').update({ is_read_by_user: true }).eq('user_id', currentUser.id).eq('is_read_by_user', false);
-             if (error) console.error("Failed to mark messages as read for user", error);
-        }
-    }, [currentUser.id, currentUser.role, fetchChatUsers]);
-
-    useEffect(() => {
-        if (currentUser.role === 'admin' && selectedUserId) {
-            markMessagesAsRead(selectedUserId);
-        } else if (currentUser.role === 'user') {
-            // Mark messages as read whenever the chat is open for the user
-            markMessagesAsRead(currentUser.id);
-        }
-    }, [selectedUserId, allMessages.length, currentUser.id, currentUser.role, markMessagesAsRead]);
-
-    const handleSelectUser = (userId: string) => {
-        setSelectedUserId(userId);
-    };
-
-    if (chatError && currentUser.role === 'admin') {
-        return (
-            <div className="p-6 bg-white dark:bg-gray-800 rounded-lg shadow text-center border-l-4 border-red-500">
-                <h3 className="text-lg font-semibold text-red-800 dark:text-red-300">Error de Configuración del Chat</h3>
-                <p className="mt-2 text-gray-600 dark:text-gray-400">
-                    {chatError}
-                </p>
-            </div>
-        );
-    }
-    
-    if (chatError && currentUser.role === 'user') {
-         return (
-             <div className="p-6 bg-white dark:bg-gray-800 rounded-lg shadow text-center border-l-4 border-yellow-500">
-                <h3 className="text-lg font-semibold text-yellow-800 dark:text-yellow-300">Chat No Disponible</h3>
-                <p className="mt-2 text-gray-600 dark:text-gray-400">
-                    La función de chat de soporte no está disponible en este momento. Por favor, contacta al administrador.
-                </p>
-            </div>
-        )
-    }
-
-    if (currentUser.role === 'admin') {
-        return (
-            <div className="flex h-[calc(100vh-10rem)] bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
-                <div className="w-1/3 border-r dark:border-gray-700 flex flex-col">
-                    <h3 className="p-4 font-semibold border-b dark:border-gray-700">Conversaciones</h3>
-                    <ul className="flex-1 overflow-y-auto">
-                        {chatUsers
-                          .sort((a,b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime())
-                          .map(user => (
-                            <li key={user.user_id} onClick={() => handleSelectUser(user.user_id)}
-                                className={`p-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 ${selectedUserId === user.user_id ? 'bg-primary-50 dark:bg-primary-900/50' : ''}`}>
-                                <div className="flex justify-between items-center">
-                                    <span className="font-semibold">{user.company_name}</span>
-                                    {user.unread_count > 0 && <span className="bg-red-500 text-white text-xs rounded-full px-2 py-1">{user.unread_count}</span>}
-                                </div>
-                                <p className="text-sm text-gray-500 truncate">{user.email}</p>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-                <div className="w-2/3 flex flex-col">
-                    {selectedUserId ? (
-                        <ChatWindow 
-                            currentUser={currentUser}
-                            messages={allMessages.filter(m => m.user_id === selectedUserId)}
-                            recipientId={selectedUserId}
-                        />
-                    ) : (
-                        <div className="flex items-center justify-center h-full text-gray-500">
-                            <p>Selecciona una conversación para empezar.</p>
-                        </div>
-                    )}
-                </div>
-            </div>
-        );
-    }
-
-    // User View
-    return <ChatWindow currentUser={currentUser} messages={allMessages} recipientId={currentUser.id} />;
-};
-
 const ChatWindow: React.FC<{
-    currentUser: User,
-    messages: ChatMessage[],
-    recipientId: string // For admin, this is the user_id. For user, it's their own id.
-}> = ({ currentUser, messages, recipientId }) => {
+    currentUser: User;
+    messages: ChatMessage[];
+    recipientId: string;
+    showAlert: (message: string, type: 'success' | 'error') => void;
+}> = ({ currentUser, messages, recipientId, showAlert }) => {
     const [newMessage, setNewMessage] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -2292,16 +2198,10 @@ const ChatWindow: React.FC<{
         e.preventDefault();
         if (!newMessage.trim()) return;
 
-        const messageContent = newMessage;
-
-        // This is the definitive workaround for a faulty RLS policy.
-        // We send the content as a stringified JSON object.
-        // The RLS policy for users seems to expect a JSON format, causing an error when it receives plain text.
-        // Sending it this way satisfies the policy's expectation, even if the column is of type 'text'.
         const payload = {
             user_id: currentUser.role === 'admin' ? recipientId : currentUser.id,
             sender_is_admin: currentUser.role === 'admin',
-            content: JSON.stringify({ text: messageContent }),
+            content: newMessage, // Simplificado a texto plano
             is_read_by_admin: currentUser.role === 'admin',
             is_read_by_user: currentUser.role !== 'admin'
         };
@@ -2310,6 +2210,7 @@ const ChatWindow: React.FC<{
 
         if (error) {
             console.error("Error sending message:", error);
+            showAlert(`Error al enviar mensaje: ${error.message}`, 'error');
         } else {
             setNewMessage('');
         }
@@ -2317,25 +2218,17 @@ const ChatWindow: React.FC<{
 
     const renderMessageContent = (content: any): string => {
         if (!content) return '';
-
-        if (typeof content === 'object' && content !== null && typeof content.text === 'string') {
-            return content.text;
-        }
-
         if (typeof content === 'string') {
             try {
                 const parsed = JSON.parse(content);
                 if (typeof parsed === 'object' && parsed !== null && typeof parsed.text === 'string') {
-                    return parsed.text;
+                    return parsed.text; // Maneja formato {"text": "mensaje"}
                 }
-                if (typeof parsed === 'string') {
-                    return parsed;
-                }
+                return parsed; // Maneja formato "mensaje" (texto JSON)
             } catch (e) {
-                return content;
+                return content; // Es texto plano
             }
         }
-        
         return String(content);
     };
     
@@ -2368,6 +2261,89 @@ const ChatWindow: React.FC<{
             </form>
         </div>
     );
+};
+
+const SupportChatPage: React.FC<{
+    currentUser: User;
+    allMessages: ChatMessage[];
+    chatUsers: ChatUser[];
+    fetchChatUsers: () => void;
+    chatError: string | null;
+    showAlert: (message: string, type: 'success' | 'error') => void;
+}> = ({ currentUser, allMessages, chatUsers, fetchChatUsers, chatError, showAlert }) => {
+    const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+
+    const markMessagesAsRead = useCallback(async (userId: string) => {
+        if (currentUser.role === 'admin') {
+            const { error } = await supabase.from('chat_messages').update({ is_read_by_admin: true }).eq('user_id', userId).eq('is_read_by_admin', false);
+            if (error) console.error("Failed to mark admin messages as read", error);
+            else fetchChatUsers(); // Refresh unread counts
+        } else {
+             const { error } = await supabase.from('chat_messages').update({ is_read_by_user: true }).eq('user_id', currentUser.id).eq('is_read_by_user', false);
+             if (error) console.error("Failed to mark user messages as read", error);
+        }
+    }, [currentUser.id, currentUser.role, fetchChatUsers]);
+
+    useEffect(() => {
+        if (currentUser.role === 'admin' && selectedUserId) {
+            markMessagesAsRead(selectedUserId);
+        } else if (currentUser.role === 'user') {
+            markMessagesAsRead(currentUser.id);
+        }
+    }, [selectedUserId, allMessages.length, currentUser.id, currentUser.role, markMessagesAsRead]);
+
+    if (chatError) {
+        return (
+            <div className="p-6 bg-white dark:bg-gray-800 rounded-lg shadow text-center border-l-4 border-red-500">
+                <h3 className="text-lg font-semibold text-red-800 dark:text-red-300">Error de Configuración del Chat</h3>
+                <p className="mt-2 text-gray-600 dark:text-gray-400">
+                    No se pudo cargar la función de chat. Es probable que haya un problema con la configuración de la base de datos o las políticas de seguridad. Por favor, contacte al administrador.
+                </p>
+                <p className="mt-2 text-xs text-gray-400 font-mono">{chatError}</p>
+            </div>
+        );
+    }
+    
+    if (currentUser.role === 'admin') {
+        return (
+            <div className="flex h-[calc(100vh-10rem)] bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+                <div className="w-1/3 border-r dark:border-gray-700 flex flex-col">
+                    <h3 className="p-4 font-semibold border-b dark:border-gray-700">Conversaciones</h3>
+                    <ul className="flex-1 overflow-y-auto">
+                        {chatUsers
+                          .sort((a,b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime())
+                          .map(user => (
+                            <li key={user.user_id} onClick={() => setSelectedUserId(user.user_id)}
+                                className={`p-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 ${selectedUserId === user.user_id ? 'bg-primary-50 dark:bg-primary-900/50' : ''}`}>
+                                <div className="flex justify-between items-center">
+                                    <span className="font-semibold">{user.company_name}</span>
+                                    {user.unread_count > 0 && <span className="bg-red-500 text-white text-xs rounded-full px-2 py-1">{user.unread_count}</span>}
+                                </div>
+                                <p className="text-sm text-gray-500 truncate">{user.email}</p>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+                <div className="w-2/3 flex flex-col">
+                    {selectedUserId ? (
+                        <ChatWindow 
+                            currentUser={currentUser}
+                            messages={allMessages.filter(m => m.user_id === selectedUserId)}
+                            recipientId={selectedUserId}
+                            showAlert={showAlert}
+                        />
+                    ) : (
+                        <div className="flex items-center justify-center h-full text-gray-500">
+                            <p>Selecciona una conversación para empezar.</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    // User View
+    return <ChatWindow currentUser={currentUser} messages={allMessages} recipientId={currentUser.id} showAlert={showAlert} />;
 };
 
 
@@ -2597,11 +2573,7 @@ const App: React.FC = () => {
             setChatUsers((data as ChatUser[]) || []);
         } catch (error: any) {
             console.error("Error fetching chat users", error);
-            if (error.message.includes("404")) { 
-                 setChatError("La función de chat no está configurada en la base de datos.");
-            } else {
-                 setChatError("Error al cargar usuarios del chat.");
-            }
+            setChatError(error.message || "Error al cargar usuarios del chat.");
         }
     }, []);
 
@@ -2623,11 +2595,7 @@ const App: React.FC = () => {
                  }
             } catch (error: any) {
                 console.error("Error fetching messages", error);
-                if (error.message.includes("does not exist")) { 
-                    setChatError("La tabla de chat no está configurada en la base de datos.");
-                } else {
-                    setChatError("Error al cargar los mensajes.");
-                }
+                setChatError(error.message || "Error al cargar los mensajes.");
             }
         }
         fetchInitialMessages();
