@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats, ChatMessage } from './types';
 import { getDashboardInsights, getInquiryReplySuggestion, getFollowUpEmailSuggestion, getBudgetItemsSuggestion } from './services/geminiService';
@@ -2293,10 +2294,14 @@ const ChatWindow: React.FC<{
 
         const messageContent = newMessage;
 
+        // This is the definitive workaround for a faulty RLS policy.
+        // We send the content as a stringified JSON object.
+        // The RLS policy for users seems to expect a JSON format, causing an error when it receives plain text.
+        // Sending it this way satisfies the policy's expectation, even if the column is of type 'text'.
         const payload = {
             user_id: currentUser.role === 'admin' ? recipientId : currentUser.id,
             sender_is_admin: currentUser.role === 'admin',
-            content: messageContent,
+            content: JSON.stringify({ text: messageContent }),
             is_read_by_admin: currentUser.role === 'admin',
             is_read_by_user: currentUser.role !== 'admin'
         };
@@ -2311,32 +2316,26 @@ const ChatWindow: React.FC<{
     };
 
     const renderMessageContent = (content: any): string => {
-        if (!content) return ''; // Handle null/undefined gracefully
+        if (!content) return '';
 
-        // Case 1: It's already an object with a 'text' property from old attempts
         if (typeof content === 'object' && content !== null && typeof content.text === 'string') {
             return content.text;
         }
 
-        // Case 2: It's a string, which could be plain text or a JSON string from old attempts
         if (typeof content === 'string') {
             try {
                 const parsed = JSON.parse(content);
-                // It was a JSON string like '{"text": "hello"}'
                 if (typeof parsed === 'object' && parsed !== null && typeof parsed.text === 'string') {
                     return parsed.text;
                 }
-                // It was a JSON string like '"hello"'
                 if (typeof parsed === 'string') {
                     return parsed;
                 }
             } catch (e) {
-                // It's just a plain text string. Return it as is.
                 return content;
             }
         }
         
-        // Fallback for any other unexpected type
         return String(content);
     };
     
