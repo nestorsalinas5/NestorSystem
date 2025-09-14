@@ -738,6 +738,7 @@ const PageContent: React.FC<{
     chatMessages: ChatMessage[];
     handleSendMessage: (content: string, recipientId?: string) => void;
     isSendingMessage: boolean;
+    unreadCountsByConversation: Map<string, number>;
 }> = (props) => {
     switch (props.currentPage) {
         case 'dashboard':
@@ -795,6 +796,7 @@ const PageContent: React.FC<{
                     messages={props.chatMessages}
                     onSendMessage={props.handleSendMessage}
                     currentUser={props.currentUser}
+                    unreadCountsByConversation={props.unreadCountsByConversation}
                 />
             ) : (
                 <UserChatPage 
@@ -2259,7 +2261,8 @@ const AdminSupportPage: React.FC<{
     messages: ChatMessage[];
     onSendMessage: (content: string, recipientId: string) => void;
     currentUser: User;
-}> = ({ conversations, selectedUser, onSelectUser, messages, onSendMessage, currentUser }) => {
+    unreadCountsByConversation: Map<string, number>;
+}> = ({ conversations, selectedUser, onSelectUser, messages, onSendMessage, currentUser, unreadCountsByConversation }) => {
     const [input, setInput] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -2283,16 +2286,28 @@ const AdminSupportPage: React.FC<{
                     <h3 className="text-xl font-semibold">Conversaciones</h3>
                 </div>
                 <div className="flex-1 overflow-y-auto">
-                    {conversations.map(user => (
-                        <div
-                            key={user.id}
-                            onClick={() => onSelectUser(user)}
-                            className={`p-4 cursor-pointer border-b dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 ${selectedUser?.id === user.id ? 'bg-primary-100 dark:bg-primary-900/50' : ''}`}
-                        >
-                            <p className="font-semibold">{user.company_name}</p>
-                            <p className="text-sm text-gray-500">{user.email}</p>
-                        </div>
-                    ))}
+                    {conversations.map(user => {
+                        const unreadCount = unreadCountsByConversation.get(user.id);
+                        return (
+                             <div
+                                key={user.id}
+                                onClick={() => onSelectUser(user)}
+                                className={`p-4 cursor-pointer border-b dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 ${selectedUser?.id === user.id ? 'bg-primary-100 dark:bg-primary-900/50' : ''}`}
+                            >
+                                <div className="flex justify-between items-center">
+                                    <div>
+                                        <p className="font-semibold">{user.company_name}</p>
+                                        <p className="text-sm text-gray-500">{user.email}</p>
+                                    </div>
+                                    {unreadCount && unreadCount > 0 && (
+                                        <span className="ml-2 bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
+                                            {unreadCount}
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
                 </div>
             </div>
             
@@ -2380,6 +2395,7 @@ const App: React.FC = () => {
     const [selectedChatUser, setSelectedChatUser] = useState<User | null>(null);
     const [isSendingMessage, setIsSendingMessage] = useState(false);
     const [unreadSupportCount, setUnreadSupportCount] = useState(0);
+    const [unreadCountsByConversation, setUnreadCountsByConversation] = useState<Map<string, number>>(new Map());
     const adminIdRef = useRef<string | null>(null);
 
     // --- ROUTING ---
@@ -2555,6 +2571,25 @@ const App: React.FC = () => {
             setUnreadSupportCount(count || 0);
         }
     }, []);
+    
+    const fetchUnreadCountsByConversation = useCallback(async (adminId: string) => {
+        const { data, error } = await supabase
+            .from('chat_messages')
+            .select('sender_id')
+            .eq('recipient_id', adminId)
+            .eq('is_read', false);
+        
+        if (error) {
+            console.error("Error fetching unread counts by conversation:", error.message);
+            return;
+        }
+
+        const counts = new Map<string, number>();
+        for (const message of data) {
+            counts.set(message.sender_id, (counts.get(message.sender_id) || 0) + 1);
+        }
+        setUnreadCountsByConversation(counts);
+    }, []);
 
     useEffect(() => {
         if (!currentUser) return;
@@ -2562,6 +2597,7 @@ const App: React.FC = () => {
             setLoading(true);
             if (currentUser.role === 'admin') {
                 await fetchAdminData();
+                await fetchUnreadCountsByConversation(currentUser.id);
             } else {
                 await fetchUserData(currentUser.id);
                 await fetchClients(currentUser.id);
@@ -2572,7 +2608,7 @@ const App: React.FC = () => {
             setLoading(false);
         };
         fetchData();
-    }, [currentUser, fetchAdminData, fetchUserData, fetchClients, fetchBudgets, fetchInquiries, fetchUnreadCount]);
+    }, [currentUser, fetchAdminData, fetchUserData, fetchClients, fetchBudgets, fetchInquiries, fetchUnreadCount, fetchUnreadCountsByConversation]);
     
     // --- CHAT FUNCTIONS ---
     const findAdminId = async () => {
@@ -2685,6 +2721,11 @@ const App: React.FC = () => {
         if (currentUser) {
             fetchChatMessages(currentUser.id, user.id);
             markMessagesAsRead(user.id);
+            setUnreadCountsByConversation(prev => {
+                const newCounts = new Map(prev);
+                newCounts.delete(user.id);
+                return newCounts;
+            });
         }
     }, [currentUser, fetchChatMessages, markMessagesAsRead]);
     
@@ -2713,6 +2754,13 @@ const App: React.FC = () => {
 
                     if (!isChatVisible) {
                         setUnreadSupportCount(prev => prev + 1);
+                        if (currentUser?.role === 'admin') {
+                            setUnreadCountsByConversation(prev => {
+                                const newCounts = new Map(prev);
+                                newCounts.set(newMessage.sender_id, (newCounts.get(newMessage.sender_id) || 0) + 1);
+                                return newCounts;
+                            });
+                        }
                     } else {
                         markMessagesAsRead(newMessage.sender_id);
                     }
@@ -3159,6 +3207,7 @@ const App: React.FC = () => {
                             chatMessages={chatMessages}
                             handleSendMessage={handleSendMessage}
                             isSendingMessage={isSendingMessage}
+                            unreadCountsByConversation={unreadCountsByConversation}
                         />
                     </main>
                     {isAnnouncementModalOpen && activeAnnouncement && (
