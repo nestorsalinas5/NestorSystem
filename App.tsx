@@ -2313,22 +2313,23 @@ const ChatWindow: React.FC<{
     };
 
     const renderMessageContent = (content: any): string => {
-        if (!content) return '';
-        // Handles new messages (plain text) and old messages stored as plain text.
-        if (typeof content === 'string') {
-            try {
-                // This will handle old messages that might have been stored as '"message"'
-                const parsed = JSON.parse(content);
-                if (typeof parsed === 'string') {
-                    return parsed;
-                }
-            } catch (e) {
-                // If it fails to parse, it's a regular string.
-                return content;
-            }
+        if (typeof content !== 'string') {
+            return String(content?.text || content || '');
         }
-        // Fallback for any other legacy format.
-        return String(content);
+        // This robustly handles all legacy formats ("test", {"text":"test"}) and new plain text.
+        try {
+            const parsed = JSON.parse(content);
+            if (typeof parsed === 'object' && parsed !== null && parsed.text) {
+                return String(parsed.text);
+            }
+            if (typeof parsed === 'string') {
+                return parsed;
+            }
+        } catch (e) {
+            // It's plain text, return as is.
+            return content;
+        }
+        return content; // Fallback
     };
     
     return (
