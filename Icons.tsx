@@ -268,15 +268,3 @@ export const MessageSquareIcon = () => (
         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
     </svg>
 );
-
-// FIX: Added ClipboardListIcon for the new schedule feature.
-export const ClipboardListIcon = () => (
-    <svg {...iconProps} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-        <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
-        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
-        <path d="M12 11h4"></path>
-        <path d="M12 16h4"></path>
-        <path d="M8 11h.01"></path>
-        <path d="M8 16h.01"></path>
-    </svg>
-);
