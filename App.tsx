@@ -1143,9 +1143,15 @@ const EventsPage: React.FC<{events: Event[], clients: Client[], saveEvent: (even
                                 <td className="p-2">{event.client?.name || 'N/A'}</td>
                                 <td className="p-2">{new Date(event.date).toLocaleDateString()}</td>
                                 <td className="p-2">{formatGuarani(event.amount_charged)}</td>
-                                <td className="p-2 flex space-x-2">
-                                    <button onClick={() => handleOpenModal(event)} className="text-primary-600 hover:underline">Editar</button>
-                                    <button onClick={() => deleteEvent(event.id)} className="text-red-500 hover:underline">Eliminar</button>
+                                <td className="p-2">
+                                    <div className="flex items-center space-x-2">
+                                        <button title="Editar" onClick={() => handleOpenModal(event)} className="p-1.5 rounded text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900/50">
+                                            <EditIcon />
+                                        </button>
+                                        <button title="Eliminar" onClick={() => deleteEvent(event.id)} className="p-1.5 rounded text-red-600 hover:bg-red-100 dark:hover:bg-red-900/50">
+                                            <TrashIcon />
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                         ))}
@@ -1275,9 +1281,15 @@ const ClientsPage: React.FC<{ clients: Client[], saveClient: (client: Client) =>
                                 <td className="p-2">{client.name}</td>
                                 <td className="p-2">{client.phone}</td>
                                 <td className="p-2">{client.email}</td>
-                                <td className="p-2 flex space-x-2">
-                                    <button onClick={() => handleOpenModal(client)} className="text-primary-600 hover:underline">Editar</button>
-                                    <button onClick={() => deleteClient(client.id)} className="text-red-500 hover:underline">Eliminar</button>
+                                <td className="p-2">
+                                    <div className="flex items-center space-x-2">
+                                        <button title="Editar" onClick={() => handleOpenModal(client)} className="p-1.5 rounded text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900/50">
+                                            <EditIcon />
+                                        </button>
+                                        <button title="Eliminar" onClick={() => deleteClient(client.id)} className="p-1.5 rounded text-red-600 hover:bg-red-100 dark:hover:bg-red-900/50">
+                                            <TrashIcon />
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                         ))}
