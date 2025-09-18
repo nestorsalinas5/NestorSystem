@@ -1,14 +1,14 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats, ChatMessage, ScheduleItem } from './types';
-import { getDashboardInsights, getInquiryReplySuggestion, getFollowUpEmailSuggestion, getBudgetItemsSuggestion, generateEventSchedule } from './services/geminiService';
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats, ChatMessage } from './types';
+import { getDashboardInsights, getInquiryReplySuggestion, getFollowUpEmailSuggestion, getBudgetItemsSuggestion } from './services/geminiService';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { 
     DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, 
     LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, 
     SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, 
     PdfIcon, EditIcon, EmailIcon, InquiryIcon, ActivityLogIcon, SparklesIcon, LogoIconOnly, 
-    BrainCircuitIcon, MessageSquareIcon, ClipboardListIcon
+    BrainCircuitIcon, MessageSquareIcon
 } from './components/Icons.tsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -619,8 +619,7 @@ const SettingsPage: React.FC<{
     currentUser: User;
     saveUser: (user: User, password?: string) => Promise<void>;
     uploadLogo: (userId: string, file: File) => Promise<string | null>;
-    showAlert: (message: string, type: 'success' | 'error') => void;
-}> = ({ currentUser, saveUser, uploadLogo, showAlert }) => {
+}> = ({ currentUser, saveUser, uploadLogo }) => {
     const [user, setUser] = useState<User>(currentUser);
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [isSaving, setIsSaving] = useState(false);
@@ -698,7 +697,6 @@ const SettingsPage: React.FC<{
 
 const PageContent: React.FC<{
     currentPage: Page;
-    setCurrentPage: (page: Page) => void;
     currentUser: User;
     events: Event[];
     clients: Client[];
@@ -766,7 +764,7 @@ const PageContent: React.FC<{
                         onGetSuggestion={props.handleGetFollowUpSuggestion}
                     />;
         case 'events':
-            return <EventsPage events={props.events} clients={props.clients} saveEvent={props.saveEvent} deleteEvent={props.deleteEvent} showAlert={props.showAlert} />;
+            return <EventsPage events={props.events} clients={props.clients} saveEvent={props.saveEvent} deleteEvent={props.deleteEvent} />;
         case 'clients':
             return <ClientsPage clients={props.clients} saveClient={props.saveClient} deleteClient={props.deleteClient} />;
         case 'agenda':
@@ -774,7 +772,7 @@ const PageContent: React.FC<{
         case 'reports':
             return <ReportsPage events={props.events} currentUser={props.currentUser} />;
         case 'settings':
-             return <SettingsPage currentUser={props.currentUser} saveUser={props.saveUser} uploadLogo={props.uploadLogo} showAlert={props.showAlert} />;
+             return <SettingsPage currentUser={props.currentUser} saveUser={props.saveUser} uploadLogo={props.uploadLogo} />;
         case 'userManagement':
             return <UserManagementPage users={props.users} saveUser={props.saveUser} />;
         case 'announcements':
@@ -1112,7 +1110,7 @@ const UserFormModal: React.FC<{user: User | null, onSave: (user: User, password?
     );
 };
 
-const EventsPage: React.FC<{events: Event[], clients: Client[], saveEvent: (event: Event) => Promise<void>, deleteEvent: (id: string) => Promise<void>, showAlert: (message: string, type: 'success' | 'error') => void;}> = ({ events, clients, saveEvent, deleteEvent, showAlert }) => {
+const EventsPage: React.FC<{events: Event[], clients: Client[], saveEvent: (event: Event) => Promise<void>, deleteEvent: (id: string) => Promise<void>}> = ({ events, clients, saveEvent, deleteEvent }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
 
@@ -1155,98 +1153,20 @@ const EventsPage: React.FC<{events: Event[], clients: Client[], saveEvent: (even
                     </tbody>
                 </table>
             </div>
-            {isModalOpen && <EventFormModal event={selectedEvent} clients={clients} onSave={handleSave} onClose={() => setIsModalOpen(false)} showAlert={showAlert}/>}
+            {isModalOpen && <EventFormModal event={selectedEvent} clients={clients} onSave={handleSave} onClose={() => setIsModalOpen(false)} />}
         </div>
     );
 };
 
-const GenerateScheduleModal: React.FC<{
-    onGenerate: (schedule: Omit<ScheduleItem, 'id'>[]) => void;
-    onClose: () => void;
-    showAlert: (message: string, type: 'success' | 'error') => void;
-}> = ({ onGenerate, onClose, showAlert }) => {
-    const [eventType, setEventType] = useState('Boda');
-    const [startTime, setStartTime] = useState('20:00');
-    const [endTime, setEndTime] = useState('04:00');
-    const [keyMoments, setKeyMoments] = useState('Cena, Vals, Lanzamiento de ramo, Cotillón');
-    const [isLoading, setIsLoading] = useState(false);
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setIsLoading(true);
-        try {
-            const scheduleJson = await generateEventSchedule(eventType, startTime, endTime, keyMoments);
-            const scheduleItems = JSON.parse(scheduleJson);
-            if (Array.isArray(scheduleItems)) {
-                onGenerate(scheduleItems);
-            } else {
-                throw new Error("La respuesta de la IA no fue un array válido.");
-            }
-        } catch (error) {
-            console.error(error);
-            const errorMessage = error instanceof Error ? error.message : "Un error desconocido ocurrió.";
-            showAlert(`Error al generar cronograma: ${errorMessage}`, 'error');
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-[60] p-4">
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-lg relative">
-                 <h3 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                    <SparklesIcon /> Director de Orquesta IA
-                 </h3>
-                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">Proporciona los detalles clave y la IA creará un cronograma profesional para tu evento.</p>
-                <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
-                    <CloseIcon />
-                </button>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                        <label htmlFor="eventType" className="block text-sm font-medium">Tipo de Evento</label>
-                        <select id="eventType" value={eventType} onChange={e => setEventType(e.target.value)} className="mt-1 w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600">
-                           <option>Boda</option>
-                           <option>15 Años</option>
-                           <option>Evento Corporativo</option>
-                           <option>Cumpleaños</option>
-                           <option>Otro</option>
-                        </select>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label htmlFor="startTime" className="block text-sm font-medium">Hora de Inicio</label>
-                            <input type="time" id="startTime" value={startTime} onChange={e => setStartTime(e.target.value)} className="mt-1 w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600"/>
-                        </div>
-                        <div>
-                            <label htmlFor="endTime" className="block text-sm font-medium">Hora de Fin</label>
-                            <input type="time" id="endTime" value={endTime} onChange={e => setEndTime(e.target.value)} className="mt-1 w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600"/>
-                        </div>
-                    </div>
-                    <div>
-                        <label htmlFor="keyMoments" className="block text-sm font-medium">Momentos Clave (separados por comas)</label>
-                        <textarea id="keyMoments" value={keyMoments} onChange={e => setKeyMoments(e.target.value)} rows={3} className="mt-1 w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" placeholder="Ej: Cena, Vals, Show de fuegos artificiales..."></textarea>
-                    </div>
-                    <div className="flex justify-end pt-4">
-                        <button type="submit" disabled={isLoading} className="px-4 py-2 rounded bg-primary-600 text-white disabled:bg-primary-400">
-                            {isLoading ? 'Generando...' : 'Generar Cronograma'}
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
-};
-
-const EventFormModal: React.FC<{event: Event | null, clients: Client[], onSave: (event: Event) => void, onClose: () => void, showAlert: (message: string, type: 'success' | 'error') => void;}> = ({ event, clients, onSave, onClose, showAlert }) => {
+const EventFormModal: React.FC<{event: Event | null, clients: Client[], onSave: (event: Event) => void, onClose: () => void}> = ({ event, clients, onSave, onClose }) => {
     const isNew = !event?.id;
     const initialEventState = useMemo(() => {
         return event 
-            ? {...event, date: event.date.split('T')[0], expenses: event.expenses.map(e => ({...e, id: Math.random().toString()})), schedule_items: event.schedule_items?.map(s => ({...s, id: Math.random().toString()})) || []} 
-            : { id: '', user_id: '', client_id: clients[0]?.id || null, client: null, name: '', location: '', date: new Date().toISOString().split('T')[0], amount_charged: 0, expenses: [], observations: '', schedule_items: [] };
+            ? {...event, date: event.date.split('T')[0], expenses: event.expenses.map(e => ({...e, id: Math.random().toString()}))} 
+            : { id: '', user_id: '', client_id: clients[0]?.id || null, client: null, name: '', location: '', date: new Date().toISOString().split('T')[0], amount_charged: 0, expenses: [], observations: '' };
     }, [event, clients]);
 
     const [formData, setFormData] = useState<Event>(initialEventState);
-    const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
@@ -1270,24 +1190,6 @@ const EventFormModal: React.FC<{event: Event | null, clients: Client[], onSave: 
     const removeExpense = (index: number) => {
         setFormData(prev => ({ ...prev, expenses: formData.expenses.filter((_, i) => i !== index) }));
     };
-
-    const handleScheduleGenerated = (items: Omit<ScheduleItem, 'id'>[]) => {
-        setFormData(prev => ({
-            ...prev,
-            schedule_items: items.map(item => ({ ...item, id: Math.random().toString() }))
-        }));
-        setIsScheduleModalOpen(false);
-    };
-
-    const handleScheduleItemChange = (index: number, field: 'activity' | 'details' | 'time', value: string) => {
-        const newSchedule = [...(formData.schedule_items || [])];
-        newSchedule[index] = { ...newSchedule[index], [field]: value };
-        setFormData(prev => ({ ...prev, schedule_items: newSchedule }));
-    };
-    
-    const removeScheduleItem = (index: number) => {
-        setFormData(prev => ({...prev, schedule_items: formData.schedule_items?.filter((_, i) => i !== index) }));
-    };
     
     const totalExpenses = formData.expenses.reduce((sum, exp) => sum + exp.amount, 0);
     const netProfit = formData.amount_charged - totalExpenses;
@@ -1295,7 +1197,7 @@ const EventFormModal: React.FC<{event: Event | null, clients: Client[], onSave: 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if(!formData.client_id) {
-            showAlert("Por favor, selecciona un cliente. Si no hay clientes, crea uno primero en la sección de Clientes.", 'error');
+            alert("Por favor, selecciona un cliente. Si no hay clientes, crea uno primero en la sección de Clientes.");
             return;
         }
         onSave(formData);
@@ -1304,109 +1206,45 @@ const EventFormModal: React.FC<{event: Event | null, clients: Client[], onSave: 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-                 <h2 className="text-2xl font-bold mb-6">{isNew ? 'Crear Nuevo' : 'Editar'} Evento</h2>
+                 <h2 className="text-2xl font-bold mb-6">{isNew ? 'Añadir' : 'Editar'} Evento</h2>
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Event Name */}
-                    <div>
-                        <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Nombre del Evento</label>
-                        <input type="text" id="name" name="name" value={formData.name} onChange={handleChange} className="mt-1 w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input type="text" name="name" value={formData.name} onChange={handleChange} placeholder="Nombre del Evento" className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
+                        <input type="text" name="location" value={formData.location} onChange={handleChange} placeholder="Lugar" className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
+                        <input type="date" name="date" value={formData.date} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
+                        <input type="number" name="amount_charged" value={formData.amount_charged} onChange={handleChange} placeholder="Monto Cobrado" className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
                     </div>
-
-                    {/* Client Select */}
                     <div>
-                        <label htmlFor="client_id" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Cliente</label>
-                        <select id="client_id" name="client_id" value={formData.client_id || ''} onChange={handleChange} className="mt-1 w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required>
-                            <option value="" disabled>Selecciona un cliente</option>
+                        <label className="block text-sm font-medium mb-1">Cliente</label>
+                        <select name="client_id" value={formData.client_id || ''} onChange={handleChange} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required>
                             {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
                     </div>
-                    
-                    {/* Location and Date */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label htmlFor="location" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Lugar</label>
-                            <input type="text" id="location" name="location" value={formData.location} onChange={handleChange} className="mt-1 w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
-                        </div>
-                        <div>
-                            <label htmlFor="date" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Fecha</label>
-                            <input type="date" id="date" name="date" value={formData.date} onChange={handleChange} className="mt-1 w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
-                        </div>
-                    </div>
-
-                    {/* Amount Charged */}
-                    <div>
-                        <label htmlFor="amount_charged" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Monto Cobrado</label>
-                        <input type="number" id="amount_charged" name="amount_charged" value={formData.amount_charged} onChange={handleChange} className="mt-1 w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" required />
-                    </div>
-
-                    {/* Observations */}
-                    <div>
-                        <label htmlFor="observations" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Observaciones</label>
-                        <textarea id="observations" name="observations" value={formData.observations || ''} onChange={handleChange} rows={3} className="mt-1 w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600"></textarea>
-                    </div>
-
-                    {/* Expenses */}
-                    <div className="border-t dark:border-gray-600 pt-4">
-                        <h4 className="text-lg font-semibold mb-2">Gastos</h4>
-                        {formData.expenses.map((exp, index) => (
+                    <div className="border-t pt-4">
+                        <h3 className="font-semibold mb-2">Gastos</h3>
+                        {formData.expenses.map((exp, i) => (
                             <div key={exp.id} className="flex items-center space-x-2 mb-2">
-                                <input type="text" placeholder="Tipo de Gasto" value={exp.type} onChange={e => handleExpenseChange(index, 'type', e.target.value)} className="w-1/2 p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
-                                <input type="number" placeholder="Monto" value={exp.amount} onChange={e => handleExpenseChange(index, 'amount', e.target.value)} className="w-1/3 p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
-                                <button type="button" onClick={() => removeExpense(index)} className="p-2 text-red-500 hover:bg-red-100 rounded-full"><TrashIcon /></button>
+                                <input type="text" value={exp.type} onChange={e => handleExpenseChange(i, 'type', e.target.value)} placeholder="Tipo de Gasto" className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
+                                <input type="number" value={exp.amount} onChange={e => handleExpenseChange(i, 'amount', e.target.value)} placeholder="Monto" className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
+                                <button type="button" onClick={() => removeExpense(i)} className="p-2 text-red-500"><TrashIcon /></button>
                             </div>
                         ))}
-                        <button type="button" onClick={addExpense} className="mt-2 text-sm text-primary-600 hover:underline flex items-center"><PlusIcon /> Añadir Gasto</button>
+                        <button type="button" onClick={addExpense} className="flex items-center text-primary-600"><PlusIcon /> <span className="ml-1">Añadir Gasto</span></button>
+                        <p className="text-right font-semibold">Total Gastos: {formatGuarani(totalExpenses)}</p>
                     </div>
-                    
-                    {/* AI Schedule */}
-                    <div className="border-t dark:border-gray-600 pt-4">
-                        <div className="flex justify-between items-center mb-2">
-                            <div className="flex items-center gap-2">
-                                <ClipboardListIcon />
-                                <h4 className="text-lg font-semibold">Cronograma del Evento (Director de Orquesta IA)</h4>
-                            </div>
-                            <button type="button" onClick={() => setIsScheduleModalOpen(true)} className="flex items-center gap-2 text-sm bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300 px-3 py-1.5 rounded-full hover:bg-blue-200 transition">
-                                <SparklesIcon />
-                                Generar con IA
-                            </button>
-                        </div>
-                        {formData.schedule_items && formData.schedule_items.length > 0 ? (
-                            <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
-                                {formData.schedule_items.map((item, index) => (
-                                    <div key={item.id} className="flex items-start space-x-2">
-                                        <input type="text" value={item.time} onChange={(e) => handleScheduleItemChange(index, 'time', e.target.value)} className="w-1/4 p-1.5 border rounded dark:bg-gray-700 dark:border-gray-600" placeholder="Hora" />
-                                        <div className="w-3/4">
-                                            <input type="text" value={item.activity} onChange={(e) => handleScheduleItemChange(index, 'activity', e.target.value)} className="w-full p-1.5 border rounded dark:bg-gray-700 dark:border-gray-600" placeholder="Actividad" />
-                                            <textarea value={item.details} onChange={(e) => handleScheduleItemChange(index, 'details', e.target.value)} className="w-full mt-1 p-1.5 border rounded dark:bg-gray-700 dark:border-gray-600 text-xs" placeholder="Detalles para el DJ..." rows={2}></textarea>
-                                        </div>
-                                        <button type="button" onClick={() => removeScheduleItem(index)} className="p-2 text-red-500 hover:bg-red-100 rounded-full flex-shrink-0 mt-1"><TrashIcon /></button>
-                                    </div>
-                                ))}
-                            </div>
-                        ) : (
-                            <p className="text-sm text-gray-500 italic">No se ha generado un cronograma. Usa el botón "Generar con IA" para empezar.</p>
-                        )}
-                    </div>
-
-                    {/* Totals */}
-                    <div className="border-t dark:border-gray-600 pt-4 text-right">
-                        <p>Total Gastos: <span className="font-semibold">{formatGuarani(totalExpenses)}</span></p>
-                        <p>Ganancia Neta: <span className={`font-bold text-lg ${netProfit >= 0 ? 'text-green-500' : 'text-red-500'}`}>{formatGuarani(netProfit)}</span></p>
-                    </div>
-                    
-                    {/* Actions */}
-                    <div className="flex justify-end space-x-4 pt-4">
+                     <textarea name="observations" value={formData.observations} onChange={handleChange} placeholder="Observaciones..." rows={3} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
+                     <div className="text-right font-bold text-lg">Ganancia Neta del Evento: {formatGuarani(netProfit)}</div>
+                     <div className="flex justify-end space-x-4 pt-4">
                         <button type="button" onClick={onClose} className="px-4 py-2 rounded bg-gray-200 dark:bg-gray-600">Cancelar</button>
                         <button type="submit" className="px-4 py-2 rounded bg-primary-600 text-white">Guardar Evento</button>
                     </div>
                 </form>
             </div>
-            {isScheduleModalOpen && <GenerateScheduleModal onGenerate={handleScheduleGenerated} onClose={() => setIsScheduleModalOpen(false)} showAlert={showAlert} />}
         </div>
     );
 };
 
-const ClientsPage: React.FC<{clients: Client[], saveClient: (client: Client) => Promise<Client | null>, deleteClient: (id: string) => Promise<void>}> = ({ clients, saveClient, deleteClient }) => {
+const ClientsPage: React.FC<{ clients: Client[], saveClient: (client: Client) => Promise<Client | null>, deleteClient: (id: string) => Promise<void>}> = ({ clients, saveClient, deleteClient }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedClient, setSelectedClient] = useState<Client | null>(null);
 
@@ -1717,7 +1555,7 @@ const SendNotificationPage: React.FC<{sendNotificationToAll: (message: string) =
 const InquiriesPage: React.FC<{
     inquiries: Inquiry[],
     convertInquiryToBudget: (inquiry: Inquiry) => Promise<void>,
-    fetchInquiries: () => void,
+    fetchInquiries: (userId: string) => Promise<void>,
     currentUser: User,
     onGetSuggestion: (inquiry: Inquiry) => void
 }> = ({ inquiries, convertInquiryToBudget, fetchInquiries, currentUser, onGetSuggestion }) => {
@@ -1727,7 +1565,7 @@ const InquiriesPage: React.FC<{
         if (error) {
             console.error("Error updating inquiry status:", error);
         } else {
-            fetchInquiries(); // Re-fetch to update the UI
+            fetchInquiries(currentUser.id);
         }
     };
     
@@ -1995,12 +1833,38 @@ const CoachPage: React.FC<{ events: Event[], clients: Client[] }> = ({ events, c
     );
 };
 
+const AnnouncementModal: React.FC<{
+    announcement: Announcement,
+    onClose: () => void
+}> = ({ announcement, onClose }) => {
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4">
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-11/12 md:w-3/4 lg:w-2/3 max-w-5xl relative max-h-[90vh] overflow-y-auto">
+                <button onClick={onClose} className="absolute top-4 right-4 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 z-10">
+                    <CloseIcon />
+                </button>
+                <h2 className="text-2xl font-bold mb-4 pr-8">{announcement.title}</h2>
+                {announcement.image_url && (
+                    <div className="mb-4">
+                        <img 
+                            src={announcement.image_url} 
+                            alt={announcement.title} 
+                            className="w-full rounded-md max-h-[70vh] object-contain" 
+                        />
+                    </div>
+                )}
+                <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{announcement.content}</p>
+            </div>
+        </div>
+    )
+}
+
 const AdminSupportPage: React.FC<{
     conversations: User[],
     selectedUser: User | null,
     onSelectUser: (user: User) => void,
     messages: ChatMessage[],
-    onSendMessage: (content: string) => void,
+    onSendMessage: (content: string, recipientId: string) => void,
     currentUser: User,
     unreadCountsByConversation: Map<string, number>
 }> = ({ conversations, selectedUser, onSelectUser, messages, onSendMessage, currentUser, unreadCountsByConversation }) => {
@@ -2012,8 +1876,8 @@ const AdminSupportPage: React.FC<{
     }, [messages]);
     
     const handleSend = () => {
-        if (newMessage.trim()) {
-            onSendMessage(newMessage);
+        if (newMessage.trim() && selectedUser) {
+            onSendMessage(newMessage, selectedUser.id);
             setNewMessage('');
         }
     };
@@ -2137,606 +2001,962 @@ const UserChatPage: React.FC<{
     );
 };
 
+const PublicInquiryPage: React.FC<{ userId: string }> = ({ userId }) => {
+    const [djProfile, setDjProfile] = useState<{ company_name: string, companyLogoUrl?: string } | null>(null);
+    const [formData, setFormData] = useState({ clientName: '', clientEmail: '', clientPhone: '', eventType: '', eventDate: '', message: '' });
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [success, setSuccess] = useState(false);
+
+    useEffect(() => {
+        const fetchDjProfile = async () => {
+            const { data, error } = await supabase.from('profiles').select('company_name, company_logo_url').eq('id', userId).single();
+            if (error || !data) {
+                setError("No se pudo encontrar el perfil del proveedor.");
+            } else {
+                setDjProfile({
+                    company_name: data.company_name,
+                    companyLogoUrl: data.company_logo_url
+                });
+            }
+            setLoading(false);
+        };
+        fetchDjProfile();
+    }, [userId]);
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    };
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        const { error } = await supabase.functions.invoke('submit-inquiry', {
+            body: { userId, ...formData }
+        });
+        if (error) {
+            setError("Hubo un error al enviar tu consulta. Por favor, intenta de nuevo.");
+        } else {
+            setSuccess(true);
+        }
+        setLoading(false);
+    };
+
+    if (loading && !djProfile) return <div className="min-h-screen flex items-center justify-center">Cargando...</div>;
+    if (error) return <div className="min-h-screen flex items-center justify-center text-red-500">{error}</div>;
+
+    if (success) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900 text-center p-4">
+                 <div className="p-8 bg-white dark:bg-gray-800 rounded-lg shadow-md w-full max-w-lg">
+                    <SuccessIcon />
+                    <h1 className="text-2xl font-bold my-4">¡Consulta Enviada!</h1>
+                    <p>Gracias por tu interés. {djProfile?.company_name} se pondrá en contacto contigo a la brevedad.</p>
+                 </div>
+            </div>
+        )
+    }
+
+    return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900 p-4">
+            <div className="p-8 bg-white dark:bg-gray-800 rounded-lg shadow-md w-full max-w-lg">
+                <div className="text-center mb-6">
+                    {djProfile?.companyLogoUrl && <img src={djProfile.companyLogoUrl} alt="Logo" className="w-20 h-20 rounded-full mx-auto mb-4 object-cover" />}
+                    <h1 className="text-2xl font-bold">Contacta a {djProfile?.company_name}</h1>
+                    <p className="text-gray-500">Completa el formulario para solicitar un presupuesto.</p>
+                </div>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <input type="text" name="clientName" placeholder="Tu Nombre Completo" onChange={handleChange} required className="w-full p-2 border rounded" />
+                    <input type="email" name="clientEmail" placeholder="Tu Email" onChange={handleChange} required className="w-full p-2 border rounded" />
+                    <input type="tel" name="clientPhone" placeholder="Tu Teléfono" onChange={handleChange} className="w-full p-2 border rounded" />
+                    <input type="text" name="eventType" placeholder="Tipo de Evento (Ej: Boda, Cumpleaños)" onChange={handleChange} className="w-full p-2 border rounded" />
+                    <div>
+                        <label className="text-sm text-gray-500">Fecha del Evento (Opcional)</label>
+                        <input type="date" name="eventDate" onChange={handleChange} className="w-full p-2 border rounded" />
+                    </div>
+                    <textarea name="message" placeholder="Cuéntanos más sobre tu evento..." rows={4} onChange={handleChange} className="w-full p-2 border rounded" />
+                    <button type="submit" disabled={loading} className="w-full bg-primary-600 text-white py-2 rounded-lg hover:bg-primary-700 disabled:bg-primary-300">
+                        {loading ? 'Enviando...' : 'Enviar Consulta'}
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+// --- MAIN APP COMPONENT ---
 const App: React.FC = () => {
-    // Auth & User State
+    // --- STATE ---
+    const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') as 'light' | 'dark') || 'light');
     const [session, setSession] = useState<AuthSession | null>(null);
     const [currentUser, setCurrentUser] = useState<User | null>(null);
-    const [users, setUsers] = useState<User[]>([]);
-    const [loading, setLoading] = useState(true);
-
-    // App State
     const [currentPage, setCurrentPage] = useState<Page>('dashboard');
-    const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') as 'light' | 'dark') || 'light');
+    const [loading, setLoading] = useState(true);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [alertState, setAlertState] = useState<AlertState>({ isOpen: false, message: '', type: 'success' });
 
-    // Data State
-    const [events, setEvents] = useState<Event[]>([]);
+    // Admin Features
+    const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+    const [activeAnnouncement, setActiveAnnouncement] = useState<Announcement | null>(null);
+    const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
+    const [adminStats, setAdminStats] = useState<AdminDashboardStats | null>(null);
+    const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
+
+    // Notifications
+    const [notifications, setNotifications] = useState<Notification[]>([]);
+    const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+
+    // User Data
+    const [users, setUsers] = useState<User[]>([]); 
+    const [events, setEvents] = useState<Event[]>([]); 
     const [clients, setClients] = useState<Client[]>([]);
     const [budgets, setBudgets] = useState<Budget[]>([]);
     const [inquiries, setInquiries] = useState<Inquiry[]>([]);
-    const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-    const [notifications, setNotifications] = useState<Notification[]>([]);
-    const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
-    const [adminStats, setAdminStats] = useState<AdminDashboardStats | null>(null);
 
-    // Modal & Alert State
-    const [alertState, setAlertState] = useState<AlertState>({ isOpen: false, message: '', type: 'success' });
+    // State for budget modal to enable cross-component actions
     const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
     const [selectedBudget, setSelectedBudget] = useState<Budget | null>(null);
-    const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-    const [aiSuggestionModal, setAiSuggestionModal] = useState({ isOpen: false, title: '', suggestion: '', isLoading: false });
+
+    // AI State
+    const [aiSuggestion, setAiSuggestion] = useState<{ title: string; suggestion: string; isLoading: boolean } | null>(null);
 
     // Chat State
+    const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [chatConversations, setChatConversations] = useState<User[]>([]);
     const [selectedChatUser, setSelectedChatUser] = useState<User | null>(null);
-    const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [isSendingMessage, setIsSendingMessage] = useState(false);
-    const [adminUserId, setAdminUserId] = useState<string | null>(null);
-    const [unreadCounts, setUnreadCounts] = useState(new Map<string, number>());
-    
-    // --- Effects ---
+    const [unreadSupportCount, setUnreadSupportCount] = useState(0);
+    const [unreadCountsByConversation, setUnreadCountsByConversation] = useState<Map<string, number>>(new Map());
+    const adminIdRef = useRef<string | null>(null);
+
+    // --- ROUTING ---
+    const getPathFromHash = () => window.location.hash.substring(1); 
+    const [path, setPath] = useState(getPathFromHash());
 
     useEffect(() => {
-        if (theme === 'dark') {
-            document.documentElement.classList.add('dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-        }
+        const onHashChange = () => setPath(getPathFromHash());
+        window.addEventListener('hashchange', onHashChange);
+        return () => window.removeEventListener('hashchange', onHashChange);
+    }, []);
+
+    // --- FUNCTIONS ---
+    const showAlert = (message: string, type: 'success' | 'error' = 'error') => {
+        setAlertState({ isOpen: true, message, type });
+    };
+
+    useEffect(() => {
+        if (theme === 'dark') document.documentElement.classList.add('dark');
+        else document.documentElement.classList.remove('dark');
         localStorage.setItem('theme', theme);
     }, [theme]);
 
+    const fetchUserProfile = useCallback(async (userId: string) => {
+        const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+        if (error) {
+            console.error('Error fetching user profile:', error);
+            if (error.code !== 'PGRST116') {
+                 showAlert(`Error al cargar tu perfil: ${error.message}`, 'error');
+                 await supabase.auth.signOut();
+            }
+            return null;
+        }
+
+        let profileData = data as any;
+        const expiryDate = new Date(profileData.active_until);
+        const today = new Date();
+        today.setHours(0,0,0,0); // Compare against start of today
+
+        if (expiryDate < today && profileData.status === 'active') {
+            const { error: updateError } = await supabase
+                .from('profiles')
+                .update({ status: 'inactive' })
+                .eq('id', userId);
+
+            if (updateError) {
+                console.error("Error auto-updating user status to inactive:", updateError);
+            } else {
+                console.log(`User ${userId} automatically set to inactive.`);
+                profileData.status = 'inactive';
+            }
+        }
+
+        const { data: { user } } = await supabase.auth.getUser();
+
+        return { 
+            ...profileData, 
+            activeUntil: profileData.active_until,
+            company_name: profileData.company_name,
+            companyLogoUrl: profileData.company_logo_url,
+            email: user?.email 
+        } as User;
+    }, []);
+
     useEffect(() => {
+        const processSession = (session: AuthSession | null) => {
+            setSession(session);
+            if (session?.user) {
+                fetchUserProfile(session.user.id).then(profile => {
+                    if (profile && profile.status === 'inactive') {
+                        showAlert('Tu cuenta está inactiva. Por favor, contacta al administrador.', 'error');
+                        supabase.auth.signOut();
+                        setCurrentUser(null);
+                    } else {
+                        setCurrentUser(profile);
+                    }
+                    setLoading(false);
+                });
+            } else {
+                setCurrentUser(null);
+                setLoading(false);
+            }
+        };
+
+        setLoading(true);
         supabase.auth.getSession().then(({ data: { session } }) => {
-            setSession(session);
-            setLoading(false);
+            processSession(session);
         });
 
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            setSession(session);
+        const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+            processSession(session);
         });
 
-        return () => subscription.unsubscribe();
-    }, []);
+        return () => authListener.subscription.unsubscribe();
+    }, [fetchUserProfile]);
 
-    const fetchAnnouncements = useCallback(async () => {
-        const { data, error } = await supabase.from('announcements').select('*').order('created_at', { ascending: false });
-        if(data) setAnnouncements(data);
-        else console.error("Error fetching announcements:", error);
-    }, []);
 
     const fetchAdminData = useCallback(async () => {
-        // Fetch all users for management
-        const { data: usersData, error: usersError } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
-        if (usersData) setUsers(usersData);
-        else console.error("Error fetching users:", usersError);
-
-        // Fetch activity logs
-        const { data: logsData, error: logsError } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(100);
-        if (logsData) setActivityLogs(logsData);
-        else console.error("Error fetching activity logs:", logsError);
-
-        fetchAnnouncements();
-
-        // Fetch stats
-        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-        const { count: newUsersCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).gte('created_at', thirtyDaysAgo);
-        const thirtyDaysFromNow = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-        const { count: expiringCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).lte('activeUntil', thirtyDaysFromNow).gte('activeUntil', new Date().toISOString());
-        const { count: totalEventsCount } = await supabase.from('events').select('*', { count: 'exact', head: true });
-
-        if(usersData) {
-            const userCountsByDate: Record<string, number> = {};
-            for (const user of usersData) {
-                const date = new Date(user.created_at).toISOString().split('T')[0];
-                userCountsByDate[date] = (userCountsByDate[date] || 0) + 1;
-            }
-            const sortedDates = Object.keys(userCountsByDate).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
-            let cumulativeUsers = 0;
-            const growthData = sortedDates.map(date => {
-                cumulativeUsers += userCountsByDate[date];
-                return { name: date, Usuarios: cumulativeUsers };
-            });
-
-            setAdminStats({
-                newUsersLast30Days: newUsersCount || 0,
-                licensesExpiringSoon: expiringCount || 0,
-                totalEvents: totalEventsCount || 0,
-                growthChartData: growthData.slice(-30),
-            });
+        const { data: stats, error: statsError } = await supabase.rpc('get_admin_dashboard_stats');
+        if (statsError) {
+            showAlert(`Error al cargar estadísticas del dashboard: ${statsError.message}`, 'error');
+            return;
         }
-    }, [fetchAnnouncements]);
+        setAdminStats(stats as AdminDashboardStats);
 
-    const fetchEvents = useCallback(async (userId: string) => {
-        const { data, error } = await supabase.from('events').select('*, client:clients(*)').eq('user_id', userId);
-        if (data) setEvents(data);
-        else console.error("Error fetching events:", error);
+        const { data: usersData, error: usersError } = await supabase.rpc('get_all_users_with_details');
+        if (usersError) {
+            showAlert(`Error al cargar la lista de usuarios: ${usersError.message}`, 'error');
+            return;
+        }
+        setUsers(usersData as User[]);
+
+        const { data: announcementsData, error: announcementsError } = await supabase.from('announcements').select('*').order('created_at', { ascending: false });
+        if(announcementsError) showAlert('Error al cargar anuncios: ' + announcementsError.message, 'error');
+        else setAnnouncements(announcementsData as Announcement[] || []);
+
+        const { data: logsData, error: logsError } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(100);
+        if(logsError) showAlert('Error al cargar registro de actividad: ' + logsError.message, 'error');
+        else setActivityLogs(logsData as ActivityLog[]);
+
     }, []);
 
     const fetchClients = useCallback(async (userId: string) => {
-        const { data, error } = await supabase.from('clients').select('*').eq('user_id', userId);
-        if (data) setClients(data);
-        else console.error("Error fetching clients:", error);
+        const { data, error } = await supabase.from('clients').select('*').eq('user_id', userId).order('name', { ascending: true });
+        if (error) showAlert("Error al cargar los clientes: " + error.message, 'error');
+        else setClients(data as Client[] || []);
     }, []);
 
     const fetchBudgets = useCallback(async (userId: string) => {
         const { data, error } = await supabase.from('budgets').select('*, client:clients(*)').eq('user_id', userId).order('created_at', { ascending: false });
-        if (data) setBudgets(data);
-        else console.error("Error fetching budgets:", error);
+        if (error) showAlert("Error al cargar los presupuestos: " + error.message, 'error');
+        else setBudgets(data as Budget[] || []);
     }, []);
 
     const fetchInquiries = useCallback(async (userId: string) => {
         const { data, error } = await supabase.from('inquiries').select('*').eq('user_id', userId).order('created_at', { ascending: false });
-        if (data) setInquiries(data);
-        else console.error("Error fetching inquiries:", error);
+        if (error) showAlert("Error al cargar las consultas: " + error.message, 'error');
+        else setInquiries(data as Inquiry[] || []);
     }, []);
 
-    const fetchNotifications = useCallback(async (userId: string) => {
-        const { data, error } = await supabase.from('notifications').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(20);
-        if (data) setNotifications(data);
-        else console.error("Error fetching notifications:", error);
+    const fetchUserData = useCallback(async (userId: string) => {
+        const { data: eventsData, error: eventsError } = await supabase.from('events').select('*, client:clients(*)').eq('user_id', userId).order('date', { ascending: false });
+        if (eventsError) showAlert("Error al cargar los eventos: " + eventsError.message, 'error');
+        else setEvents(eventsData as Event[] || []);
+
+        const { data: announcementData, error: announcementError } = await supabase.from('announcements').select('*').eq('is_active', true).limit(1).single();
+        if(announcementData && !announcementError) {
+             const announcementId = announcementData.id;
+             const hasSeen = sessionStorage.getItem(`seen_announcement_${announcementId}`);
+             if (!hasSeen) {
+                 setActiveAnnouncement(announcementData as Announcement);
+                 setIsAnnouncementModalOpen(true);
+                 sessionStorage.setItem(`seen_announcement_${announcementId}`, 'true');
+             }
+        }
+
+        const { data: notificationsData, error: notificationsError } = await supabase.from('notifications').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+        if(notificationsError) showAlert("Error al cargar notificaciones: " + notificationsError.message, 'error');
+        else setNotifications(notificationsData as Notification[] || []);
+
     }, []);
 
-    const fetchAdminUserId = useCallback(async () => {
-        const { data, error } = await supabase.from('profiles').select('id').eq('role', 'admin').limit(1).single();
-        if (data) setAdminUserId(data.id);
-        else console.error("Could not find admin user:", error);
-    }, []);
+    const fetchUnreadCount = useCallback(async (userId: string) => {
+        const { count, error } = await supabase
+            .from('chat_messages')
+            .select('*', { count: 'exact', head: true })
+            .eq('recipient_id', userId)
+            .eq('is_read', false);
 
-    const fetchUnreadCounts = useCallback(async () => {
-        if (currentUser?.role !== 'admin') return;
-        const { data, error } = await supabase.from('chat_messages').select('sender_id').eq('recipient_id', currentUser.id).eq('is_read', false);
-        if (error) { console.error("Error fetching unread counts:", error); return; }
-        if (data) {
-            const counts = new Map<string, number>();
-            for (const message of data) {
-                if (message.sender_id) {
-                    counts.set(message.sender_id, (counts.get(message.sender_id) || 0) + 1);
-                }
-            }
-            setUnreadCounts(counts);
-        }
-    }, [currentUser]);
-
-    const fetchAllData = useCallback(async (user: User) => {
-        if (user.role === 'admin') {
-            fetchAdminData();
-        } else {
-            fetchEvents(user.id);
-            fetchClients(user.id);
-            fetchBudgets(user.id);
-            fetchInquiries(user.id);
-            fetchNotifications(user.id);
-            fetchAdminUserId();
-        }
-    }, [fetchAdminData, fetchEvents, fetchClients, fetchBudgets, fetchInquiries, fetchNotifications, fetchAdminUserId]);
-
-    const fetchChatConversations = useCallback(async () => {
-        if (!currentUser || currentUser.role !== 'admin') return;
-        const { data, error } = await supabase.rpc('get_conversations', { admin_id: currentUser.id });
-        if (error) console.error("Error fetching conversations:", error);
-        else if (data) setChatConversations(data);
-    }, [currentUser]);
-    
-    const fetchUserProfile = useCallback(async (userId: string) => {
-        const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-        if (data) setCurrentUser(data);
-        else {
-            console.error("Error fetching profile:", error);
-            await supabase.auth.signOut();
-        }
-    }, []);
-
-    useEffect(() => {
-        if (session?.user) {
-            fetchUserProfile(session.user.id);
-        }
-    }, [session, fetchUserProfile]);
-
-    useEffect(() => {
-        if (currentUser) {
-            fetchAllData(currentUser);
-        }
-    }, [currentUser, fetchAllData]);
-    
-    // --- Realtime Subscriptions ---
-    useEffect(() => {
-        if (!currentUser) return;
-        
-        const handleNewMessage = (payload: any) => {
-            const newMessage = payload.new as ChatMessage;
-            const isForMe = newMessage.recipient_id === currentUser.id;
-            
-            if (isForMe) {
-                 if(currentUser.role === 'admin') {
-                    if(selectedChatUser && newMessage.sender_id === selectedChatUser.id) {
-                         setChatMessages(prev => [...prev, newMessage]);
-                    }
-                    fetchUnreadCounts();
-                 } else {
-                    setChatMessages(prev => [...prev, newMessage]);
-                 }
-            }
-        };
-
-        const messageChannel = supabase
-            .channel('public:chat_messages')
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, handleNewMessage)
-            .subscribe();
-            
-        return () => { supabase.removeChannel(messageChannel); };
-    }, [currentUser, selectedChatUser, fetchUnreadCounts]);
-
-    useEffect(() => {
-        if (currentUser?.role === 'admin') {
-            fetchChatConversations();
-            fetchUnreadCounts();
-            const conversationSubscription = supabase
-                .channel('public:chat_messages:conversations')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, () => {
-                    fetchChatConversations();
-                    fetchUnreadCounts();
-                })
-                .subscribe();
-            return () => { supabase.removeChannel(conversationSubscription); };
-        }
-    }, [currentUser, fetchChatConversations, fetchUnreadCounts]);
-
-    // --- Helper & Data Functions ---
-    const toggleTheme = () => setTheme(prevTheme => prevTheme === 'light' ? 'dark' : 'light');
-    const showAlert = (message: string, type: 'success' | 'error') => setAlertState({ isOpen: true, message, type });
-
-    const saveEvent = useCallback(async (event: Event) => {
-        const eventToSave = {
-            ...event,
-            user_id: currentUser!.id,
-            schedule_items: event.schedule_items?.map(({ id, ...rest }) => rest),
-            expenses: event.expenses.map(({ id, ...rest }) => rest)
-        };
-        delete eventToSave.client;
-
-        const { data, error } = await supabase.from('events').upsert(eventToSave).select('*, client:clients(*)').single();
-        if (error) showAlert(error.message, 'error');
-        else if(data) {
-            showAlert('Evento guardado con éxito.', 'success');
-            setEvents(prev => event.id ? prev.map(e => e.id === data.id ? data : e) : [...prev, data]);
-            logActivity('save_event', { eventId: data.id, eventName: data.name });
-        }
-    }, [currentUser]);
-
-    const deleteEvent = useCallback(async (id: string) => {
-        if (!window.confirm('¿Estás seguro de que quieres eliminar este evento?')) return;
-        const { error } = await supabase.from('events').delete().eq('id', id);
-        if (error) showAlert(error.message, 'error');
-        else {
-            setEvents(prev => prev.filter(e => e.id !== id));
-            showAlert('Evento eliminado.', 'success');
-            logActivity('delete_event', { eventId: id });
-        }
-    }, []);
-
-    const saveClient = useCallback(async (client: Client): Promise<Client | null> => {
-        const clientToSave = { ...client, user_id: currentUser!.id };
-        const { data, error } = await supabase.from('clients').upsert(clientToSave).select().single();
         if (error) {
-            showAlert(error.message, 'error');
-            return null;
+            console.error("Error fetching unread count:", error.message);
+        } else {
+            setUnreadSupportCount(count || 0);
         }
-        else if (data) {
-            showAlert('Cliente guardado.', 'success');
-            setClients(prev => client.id ? prev.map(c => c.id === data.id ? data : c) : [...prev, data]);
-            logActivity('save_client', { clientId: data.id, clientName: data.name });
-            return data;
-        }
-        return null;
-    }, [currentUser]);
+    }, []);
+    
+    const fetchUnreadCountsByConversation = useCallback(async (adminId: string) => {
+        const { data, error } = await supabase
+            .from('chat_messages')
+            .select('sender_id')
+            .eq('recipient_id', adminId)
+            .eq('is_read', false);
 
-    const deleteClient = useCallback(async (id: string) => {
-        const associatedEvents = events.filter(e => e.client_id === id);
-        if (associatedEvents.length > 0) {
-            showAlert(`No se puede eliminar. El cliente está asociado a ${associatedEvents.length} evento(s).`, 'error');
+        if (error) {
+            console.error("Error fetching unread counts by conversation:", error.message);
             return;
         }
-        if (!window.confirm('¿Estás seguro de que quieres eliminar este cliente?')) return;
-        const { error } = await supabase.from('clients').delete().eq('id', id);
-        if (error) showAlert(error.message, 'error');
-        else {
-            setClients(prev => prev.filter(c => c.id !== id));
-            showAlert('Cliente eliminado.', 'success');
-            logActivity('delete_client', { clientId: id });
+        
+        const counts = new Map<string, number>();
+        for (const message of data) {
+            counts.set(message.sender_id, (counts.get(message.sender_id) || 0) + 1);
         }
-    }, [events]);
+        setUnreadCountsByConversation(counts);
+    }, []);
 
-    const saveBudget = useCallback(async (budget: Budget) => {
-        const budgetToSave = { ...budget, user_id: currentUser!.id, items: budget.items.map(({ id, ...rest }) => rest) };
-        delete budgetToSave.client;
+    useEffect(() => {
+        if (!currentUser) return;
+        const fetchData = async () => {
+            setLoading(true);
+            if (currentUser.role === 'admin') {
+                await fetchAdminData();
+                await fetchUnreadCountsByConversation(currentUser.id);
+            } else {
+                await fetchUserData(currentUser.id);
+                await fetchClients(currentUser.id);
+                await fetchBudgets(currentUser.id);
+                await fetchInquiries(currentUser.id);
+            }
+            await fetchUnreadCount(currentUser.id);
+            setLoading(false);
+        };
+        fetchData();
+    }, [currentUser, fetchAdminData, fetchUserData, fetchClients, fetchBudgets, fetchInquiries, fetchUnreadCount, fetchUnreadCountsByConversation]);
 
-        const { data, error } = await supabase.from('budgets').upsert(budgetToSave).select('*, client:clients(*)').single();
-        if (error) showAlert(error.message, 'error');
-        else if(data) {
-            showAlert('Presupuesto guardado.', 'success');
-            setBudgets(prev => budget.id ? prev.map(b => b.id === data.id ? data : b) : [...prev, data]);
-            logActivity('save_budget', { budgetId: data.id, budgetTitle: data.title });
+    // --- CHAT FUNCTIONS ---
+    const findAdminId = useCallback(async () => {
+        if (adminIdRef.current) return adminIdRef.current;
+        const { data, error } = await supabase.from('profiles').select('id').eq('role', 'admin').limit(1).single();
+        if (error || !data) {
+            console.error("Could not find admin user.");
+            return null;
         }
-    }, [currentUser]);
+        adminIdRef.current = data.id;
+        return data.id;
+    }, []);
 
-    const deleteBudget = useCallback(async (id: string) => {
-        if (!window.confirm('¿Estás seguro de que quieres eliminar este presupuesto?')) return;
-        const { error } = await supabase.from('budgets').delete().eq('id', id);
-        if (error) showAlert(error.message, 'error');
-        else {
-            setBudgets(prev => prev.filter(b => b.id !== id));
-            showAlert('Presupuesto eliminado.', 'success');
-            logActivity('delete_budget', { budgetId: id });
+    const fetchChatMessages = useCallback(async (userId1: string, userId2: string) => {
+        const { data, error } = await supabase.from('chat_messages')
+            .select('*')
+            .or(`and(sender_id.eq.${userId1},recipient_id.eq.${userId2}),and(sender_id.eq.${userId2},recipient_id.eq.${userId1})`)
+            .order('created_at', { ascending: true });
+        if (error) {
+            showAlert('Error al cargar mensajes: ' + error.message, 'error');
+        } else {
+            setChatMessages(data || []);
         }
     }, []);
 
-    const saveUser = useCallback(async (user: User, password?: string) => {
-        if (user.id) { // Existing user
-            if (password) {
-                 showAlert('La actualización de contraseña para usuarios existentes debe hacerse a través del flujo de recuperación de contraseña de Supabase.', 'error');
-            }
-            const { data, error } = await supabase.from('profiles').update({
-                company_name: user.company_name,
-                status: user.status,
-                activeUntil: user.activeUntil,
-                notification_email: user.notification_email
-            }).eq('id', user.id).select().single();
+    const fetchConversations = useCallback(async () => {
+        if (!currentUser) return;
+        const { data: messageSenders, error: senderError } = await supabase
+            .from('chat_messages')
+            .select('sender_id')
+            .neq('sender_id', currentUser.id);
 
-            if (error) showAlert(error.message, 'error');
-            else if (data) {
-                setUsers(prev => prev.map(u => u.id === data.id ? data : u));
-                if (currentUser?.id === data.id) setCurrentUser(data);
-                showAlert('Usuario actualizado.', 'success');
-                logActivity('update_user', { userId: data.id, userEmail: data.email });
-            }
-        } else { // New user
-            const { data: { user: newAuthUser }, error: authError } = await supabase.auth.signUp({
-                email: user.email!,
-                password: password!,
+        if (senderError) {
+            showAlert('Error fetching message senders: ' + senderError.message, 'error');
+            return;
+        }
+        const userIds = [...new Set(messageSenders.map(item => item.sender_id))];
+        if (userIds.length === 0) {
+            setChatConversations([]);
+            return;
+        }
+        const { data: profiles, error: profileError } = await supabase
+            .from('profiles')
+            .select('*')
+            .in('id', userIds);
+        
+        if (profileError) {
+            showAlert('Error fetching user profiles for chat: ' + profileError.message, 'error');
+        } else {
+            setChatConversations(profiles as User[] || []);
+        }
+    }, [currentUser]);
+
+    const markMessagesAsRead = useCallback(async (senderId: string) => {
+        if (!currentUser) return;
+        const { error } = await supabase
+            .from('chat_messages')
+            .update({ is_read: true })
+            .eq('recipient_id', currentUser.id)
+            .eq('sender_id', senderId);
+
+        if (error) {
+            console.error("Error marking messages as read:", error.message);
+        } else {
+            // After successfully marking as read, refetch the total count to ensure UI is in sync with DB
+            await fetchUnreadCount(currentUser.id);
+        }
+    }, [currentUser, fetchUnreadCount]);
+
+    const handleSendMessage = async (content: string, recipientId?: string) => {
+        if (!currentUser) return;
+
+        const adminId = await findAdminId();
+        if (!adminId && currentUser.role !== 'admin') {
+            showAlert('No se pudo encontrar al administrador del sistema.', 'error');
+            return;
+        }
+
+        const determinedRecipientId = currentUser.role === 'admin' ? recipientId! : adminId!;
+        
+        const optimisticMessage: ChatMessage = {
+            id: `temp-${Date.now()}`,
+            created_at: new Date().toISOString(),
+            sender_id: currentUser.id,
+            recipient_id: determinedRecipientId,
+            content: content,
+            is_read: false,
+        };
+        setChatMessages(prev => [...prev, optimisticMessage]);
+
+        const messageToInsert: Omit<ChatMessage, 'id' | 'created_at' | 'is_read'> = {
+            content,
+            sender_id: currentUser.id,
+            recipient_id: determinedRecipientId,
+        };
+
+        const { error } = await supabase.from('chat_messages').insert(messageToInsert);
+
+        if (error) {
+            showAlert('Error al enviar mensaje: ' + error.message, 'error');
+            setChatMessages(prev => prev.filter(msg => msg.id !== optimisticMessage.id));
+        } else if (currentUser.role !== 'admin') {
+            await supabase.functions.invoke('send-chat-notification', {
+                body: { senderId: currentUser.id, message: content }
             });
-            if (authError) { showAlert(authError.message, 'error'); return; }
-            if (newAuthUser) {
-                const { data, error } = await supabase.from('profiles').insert({
-                    id: newAuthUser.id,
-                    email: newAuthUser.email,
-                    company_name: user.company_name,
-                    status: user.status,
-                    activeUntil: user.activeUntil,
-                    role: user.role
-                }).select().single();
-                if (error) showAlert(error.message, 'error');
-                else if(data) {
-                    setUsers(prev => [...prev, data]);
-                    showAlert('Usuario creado.', 'success');
-                    logActivity('create_user', { userId: data.id, userEmail: data.email });
+        }
+    };
+
+    const handleSelectChatUser = useCallback((user: User) => {
+        setSelectedChatUser(user);
+        if (currentUser) {
+            fetchChatMessages(currentUser.id, user.id);
+            // Mark messages as read in the database
+            markMessagesAsRead(user.id);
+            // Instantly update the UI for both individual and total counters
+            setUnreadCountsByConversation(prev => {
+                const newCounts = new Map(prev);
+                newCounts.delete(user.id);
+                // Recalculate total from the map for instant feedback
+                const newTotal = Array.from(newCounts.values()).reduce((a, b) => a + b, 0);
+                setUnreadSupportCount(newTotal);
+                return newCounts;
+            });
+        }
+    }, [currentUser, fetchChatMessages, markMessagesAsRead]);
+
+    // Effect for handling real-time chat updates
+    useEffect(() => {
+        if (!currentUser) return;
+
+        const chatChannel = supabase.channel(`chat_for_${currentUser.id}`)
+            .on<ChatMessage>(
+                'postgres_changes', 
+                { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `recipient_id=eq.${currentUser.id}` }, 
+                (payload) => {
+                    const newMessage = payload.new;
+                     setChatMessages(prev => {
+                        if (prev.some(msg => msg.id === newMessage.id)) return prev;
+                        return [...prev, newMessage];
+                    });
+
+                    let isChatVisible = false;
+                    if (currentPage === 'support') {
+                        if (currentUser.role === 'user') {
+                            isChatVisible = true;
+                        } else if (currentUser.role === 'admin' && selectedChatUser?.id === newMessage.sender_id) {
+                            isChatVisible = true;
+                        }
+                    }
+
+                    if (!isChatVisible) {
+                        setUnreadSupportCount(prev => prev + 1);
+                        if (currentUser?.role === 'admin') {
+                            setUnreadCountsByConversation(prev => {
+                                const newCounts = new Map(prev);
+                                newCounts.set(newMessage.sender_id, (newCounts.get(newMessage.sender_id) || 0) + 1);
+                                return newCounts;
+                            });
+                        }
+                    } else {
+                        markMessagesAsRead(newMessage.sender_id);
+                    }
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(chatChannel);
+        };
+    }, [currentUser, currentPage, selectedChatUser, markMessagesAsRead]);
+
+    // Effect for handling actions when entering the support page
+    useEffect(() => {
+        const onEnterSupportPage = async () => {
+            if (currentPage === 'support' && currentUser) {
+                if (currentUser.role === 'admin') {
+                    await fetchConversations();
+                } else {
+                    // For users, mark all messages as read from the admin.
+                    const adminId = await findAdminId();
+                    if (adminId) {
+                        await fetchChatMessages(currentUser.id, adminId);
+                        await markMessagesAsRead(adminId);
+                    }
                 }
             }
-        }
-    }, [currentUser]);
+        };
+        onEnterSupportPage();
+    }, [currentPage, currentUser, fetchConversations, fetchChatMessages, markMessagesAsRead, findAdminId]);
 
-    const uploadLogo = useCallback(async (userId: string, file: File): Promise<string | null> => {
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${userId}-${Date.now()}.${fileExt}`;
-        const { error: uploadError } = await supabase.storage.from('logos').upload(fileName, file, { upsert: true });
-        if (uploadError) { showAlert(`Error al subir logo: ${uploadError.message}`, 'error'); return null; }
-        const { data } = supabase.storage.from('logos').getPublicUrl(fileName);
-        return data.publicUrl;
-    }, []);
-
-    const saveAnnouncement = useCallback(async (announcement: Announcement, imageFile?: File | null) => {
-        let imageUrl = announcement.image_url;
-        if (imageFile) {
-            const fileExt = imageFile.name.split('.').pop();
-            const fileName = `announcement-${Date.now()}.${fileExt}`;
-            const { error: uploadError } = await supabase.storage.from('announcements').upload(fileName, imageFile);
-            if (uploadError) { showAlert(`Error al subir imagen: ${uploadError.message}`, 'error'); return; }
-            const { data } = supabase.storage.from('announcements').getPublicUrl(fileName);
-            imageUrl = data.publicUrl;
-        }
-        
-        const annToSave = { ...announcement, image_url: imageUrl };
-        const { data, error } = await supabase.from('announcements').upsert(annToSave).select().single();
-        if (error) showAlert(error.message, 'error');
-        else if (data) {
-            setAnnouncements(prev => announcement.id ? prev.map(a => a.id === data.id ? data : a) : [...prev, data]);
-            showAlert('Anuncio guardado.', 'success');
-        }
-    }, []);
-
-    const deleteAnnouncement = useCallback(async (id: string) => {
-        if (!window.confirm('¿Seguro que quieres eliminar este anuncio?')) return;
-        const { error } = await supabase.from('announcements').delete().eq('id', id);
-        if (error) showAlert(error.message, 'error');
-        else {
-            setAnnouncements(prev => prev.filter(a => a.id !== id));
-            showAlert('Anuncio eliminado.', 'success');
-        }
-    }, []);
-
-    const toggleAnnouncementActive = useCallback(async (announcement: Announcement) => {
-        const { data, error } = await supabase.from('announcements').update({ is_active: !announcement.is_active }).eq('id', announcement.id).select().single();
-        if (error) showAlert(error.message, 'error');
-        else if(data) setAnnouncements(prev => prev.map(a => a.id === data.id ? data : a));
-    }, []);
-    
-    const sendNotificationToAll = useCallback(async (message: string) => {
-        const { data: usersToNotify, error } = await supabase.from('profiles').select('id').eq('role', 'user');
-        if (error || !usersToNotify) { showAlert('Error al obtener usuarios.', 'error'); return; }
-        const notificationsToInsert = usersToNotify.map(user => ({ user_id: user.id, message: message, type: 'announcement' }));
-        const { error: insertError } = await supabase.from('notifications').insert(notificationsToInsert);
-        if (insertError) showAlert(insertError.message, 'error');
-        else showAlert(`Notificación enviada a ${usersToNotify.length} usuarios.`, 'success');
-    }, []);
-
-    const convertInquiryToBudget = useCallback(async (inquiry: Inquiry) => {
-        let client = clients.find(c => c.email === inquiry.client_email || c.phone === inquiry.client_phone);
-
-        if (!client) {
-            const newClient = await saveClient({ id: '', user_id: currentUser!.id, name: inquiry.client_name, email: inquiry.client_email, phone: inquiry.client_phone });
-            if(newClient) client = newClient;
-        }
-
-        if (client) {
-            const newBudget: Budget = {
-                id: '', user_id: currentUser!.id, client_id: client.id, title: `Presupuesto para ${inquiry.event_type || 'evento'}`,
-                status: 'Borrador', items: [{ id: Math.random().toString(), description: '', quantity: 1, price: 0 }], discount: 0,
-                notes: `Basado en la consulta recibida el ${new Date(inquiry.created_at).toLocaleDateString()}.\n\nMensaje original: ${inquiry.message}`,
-                valid_until: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString(), created_at: new Date().toISOString(),
-            };
-            setSelectedBudget(newBudget);
-            setCurrentPage('budgets');
-            setIsBudgetModalOpen(true);
-        } else {
-            showAlert('No se pudo crear o encontrar un cliente para la consulta.', 'error');
-        }
-    }, [clients, currentUser, saveClient]);
-    
-    const handleGetInquirySuggestion = useCallback(async (inquiry: Inquiry) => {
-        setAiSuggestionModal({ isOpen: true, title: "Sugerencia de Respuesta", suggestion: '', isLoading: true });
-        const suggestion = await getInquiryReplySuggestion(inquiry.message || '');
-        setAiSuggestionModal(prev => ({ ...prev, suggestion, isLoading: false }));
-    }, []);
-
-    const handleGetFollowUpSuggestion = useCallback(async (budget: Budget) => {
-        const clientName = clients.find(c => c.id === budget.client_id)?.name || 'Cliente';
-        setAiSuggestionModal({ isOpen: true, title: "Sugerencia de Seguimiento", suggestion: '', isLoading: true });
-        const suggestion = await getFollowUpEmailSuggestion(clientName, budget.title);
-        setAiSuggestionModal(prev => ({ ...prev, suggestion, isLoading: false }));
-    }, [clients]);
-    
-    const markNotificationsAsRead = useCallback(async () => {
-        const { error } = await supabase.from('notifications').update({ is_read: true }).eq('user_id', currentUser!.id).eq('is_read', false);
-        if (!error) setNotifications(prev => prev.map(n => ({...n, is_read: true})));
-    }, [currentUser]);
-
-    const handleSelectChatUser = useCallback(async (user: User) => {
-        setSelectedChatUser(user);
-        const { data, error } = await supabase.from('chat_messages').select('*')
-            .or(`(sender_id.eq.${currentUser!.id},recipient_id.eq.${user.id}),(sender_id.eq.${user.id},recipient_id.eq.${currentUser!.id})`)
-            .order('created_at');
-        if (error) showAlert('Error al cargar mensajes.', 'error');
-        else {
-            setChatMessages(data || []);
-            const { error: updateError } = await supabase.from('chat_messages').update({ is_read: true }).eq('sender_id', user.id).eq('recipient_id', currentUser!.id);
-            if (!updateError) fetchUnreadCounts();
-        }
-    }, [currentUser, fetchUnreadCounts]);
-
-    const handleSendMessage = useCallback(async (content: string, recipientId?: string) => {
-        setIsSendingMessage(true);
-        let finalRecipientId: string | null = null;
-        if (currentUser?.role === 'admin') finalRecipientId = selectedChatUser?.id || null;
-        else finalRecipientId = recipientId || adminUserId;
-        if (!finalRecipientId) {
-            showAlert('No se pudo determinar el destinatario.', 'error'); setIsSendingMessage(false); return;
-        }
-        const newMessage: Omit<ChatMessage, 'id' | 'created_at'> = { sender_id: currentUser!.id, recipient_id: finalRecipientId, content: content, is_read: false };
-        const { data, error } = await supabase.from('chat_messages').insert(newMessage).select().single();
-        if (error) showAlert('Error al enviar mensaje.', 'error');
-        else if(data && currentUser?.role !== 'admin') setChatMessages(prev => [...prev, data]);
-        setIsSendingMessage(false);
-    }, [currentUser, selectedChatUser, adminUserId]);
+    // --- END CHAT FUNCTIONS ---
 
     const handleLogout = async () => {
+        sessionStorage.clear();
         await supabase.auth.signOut();
-        setCurrentUser(null);
+        setCurrentPage('dashboard');
+    };
+
+    const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
+
+    const saveEvent = async (event: Event) => {
+        const isNew = !event.id;
+        
+        const payload: any = {
+            user_id: currentUser!.id,
+            client_id: event.client_id,
+            name: event.name,
+            location: event.location,
+            date: event.date,
+            amount_charged: event.amount_charged,
+            expenses: event.expenses.map(({ id: expenseId, ...rest }) => rest), // Remove temp client-side ID
+            observations: event.observations,
+        };
+
+        if (!isNew) {
+            payload.id = event.id;
+        }
+
+        const { error } = await supabase.from('events').upsert(payload);
+        
+        if (error) {
+            showAlert('Error al guardar el evento: ' + error.message, 'error');
+        } else {
+            showAlert('Evento guardado exitosamente.', 'success');
+            await logActivity(isNew ? 'event_created' : 'event_updated', { eventName: event.name });
+            if (isNew) {
+                const eventClient = clients.find(c => c.id === event.client_id);
+                if (eventClient && eventClient.email) {
+                    await supabase.functions.invoke('send-event-confirmation', {
+                        body: {
+                            clientEmail: eventClient.email,
+                            clientName: eventClient.name,
+                            eventName: event.name,
+                            eventDate: event.date,
+                            eventLocation: event.location,
+                            companyName: currentUser!.company_name,
+                        }
+                    });
+                }
+            }
+            await fetchUserData(currentUser!.id);
+        }
+    };
+
+    const deleteEvent = async (eventId: string) => {
+        if (window.confirm('¿Estás seguro de que quieres eliminar este evento?')) {
+            const eventToDelete = events.find(e => e.id === eventId);
+            const { error } = await supabase.from('events').delete().eq('id', eventId);
+            if (error) showAlert('Error al eliminar el evento: ' + error.message, 'error');
+            else {
+                showAlert('Evento eliminado.', 'success');
+                await logActivity('event_deleted', { eventName: eventToDelete?.name || 'Desconocido' });
+                await fetchUserData(currentUser!.id);
+            }
+        }
+    };
+
+    const saveClient = async (client: Client): Promise<Client | null> => {
+        const isNew = !client.id;
+
+        const payload: any = {
+            user_id: currentUser!.id,
+            name: client.name,
+            phone: client.phone,
+            email: client.email,
+        };
+
+        if (!isNew) {
+            payload.id = client.id;
+        }
+
+        const { data, error } = await supabase.from('clients').upsert(payload).select().single();
+
+        if (error) {
+            showAlert('Error al guardar el cliente: ' + error.message, 'error');
+            return null;
+        } else {
+            showAlert('Cliente guardado exitosamente.', 'success');
+            await logActivity(isNew ? 'client_created' : 'client_updated', { clientName: client.name });
+            if (isNew && client.email) {
+                 await supabase.functions.invoke('send-welcome-email', {
+                    body: { email: client.email, name: client.name, djCompanyName: currentUser!.company_name },
+                });
+            }
+            await fetchClients(currentUser!.id);
+            return data as Client;
+        }
+    };
+    
+    const deleteClient = async (clientId: string) => {
+        if (window.confirm('¿Estás seguro de que quieres eliminar este cliente? Esto no eliminará sus eventos asociados.')) {
+            const clientToDelete = clients.find(c => c.id === clientId);
+            const { error } = await supabase.from('clients').delete().eq('id', clientId);
+            if (error) showAlert('Error al eliminar el cliente: ' + error.message, 'error');
+            else {
+                showAlert('Cliente eliminado.', 'success');
+                await logActivity('client_deleted', { clientName: clientToDelete?.name || 'Desconocido' });
+                await fetchClients(currentUser!.id);
+            }
+        }
+    };
+
+    const saveUser = async (user: User, password?: string) => {
+        const isNewUser = !user.id;
+        const { id, role, status, activeUntil, company_name, companyLogoUrl, notification_email } = user;
+
+        if (isNewUser) {
+             if (!user.email || !password) {
+                showAlert("Email y contraseña son requeridos para crear un usuario.", 'error');
+                return;
+            }
+            const { error } = await supabase.functions.invoke('create-user', {
+                body: { email: user.email, password, companyName: company_name, activeUntil },
+            });
+            if (error) showAlert("Error al crear usuario: " + error.message, 'error');
+            else {
+                showAlert("Usuario creado exitosamente.", 'success');
+                await logActivity('admin_user_created', { userEmail: user.email });
+                await fetchAdminData();
+            }
+        } else {
+            const updateData: any = { role, status, active_until: activeUntil, company_name, company_logo_url: companyLogoUrl };
+            if (currentUser?.role === 'admin') {
+                updateData.notification_email = notification_email;
+            }
+            const { error } = await supabase.from('profiles').update(updateData).eq('id', id);
+
+            if (error) showAlert("Error actualizando perfil: " + error.message, 'error');
+            else {
+                await fetchAdminData();
+                if (currentUser?.id === user.id) setCurrentUser(await fetchUserProfile(user.id));
+                showAlert("Perfil actualizado exitosamente.", 'success');
+                await logActivity('admin_user_updated', { userEmail: user.email });
+            }
+        }
+    };
+
+    const uploadFile = async (bucket: string, path: string, file: File) => {
+         const { error } = await supabase.storage.from(bucket).upload(path, file, { upsert: true });
+        if (error) {
+            showAlert(`Error al subir archivo: ${error.message}`, 'error');
+            return null;
+        }
+        const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+        return `${data.publicUrl}?t=${new Date().getTime()}`;
+    }
+
+    const uploadLogo = (userId: string, file: File) => uploadFile('logos', `${userId}/logo.${file.name.split('.').pop()}`, file);
+    
+    const saveAnnouncement = async (announcement: Announcement, imageFile?: File | null) => {
+        let imageUrl = announcement.image_url;
+        if(imageFile) {
+            const newImageUrl = await uploadFile('announcements', `image_${Date.now()}.${imageFile.name.split('.').pop()}`, imageFile);
+            if(!newImageUrl) return; // Stop if upload fails
+            imageUrl = newImageUrl;
+        }
+
+        const payload = {
+            title: announcement.title,
+            content: announcement.content,
+            image_url: imageUrl,
+            is_active: announcement.is_active,
+            created_by: currentUser!.id
+        };
+        
+        const upsertData = announcement.id ? { ...payload, id: announcement.id } : payload;
+
+        const { error } = await supabase.from('announcements').upsert(upsertData);
+        if(error) showAlert('Error guardando anuncio: ' + error.message, 'error');
+        else {
+            showAlert('Anuncio guardado exitosamente.', 'success');
+            await logActivity('admin_announcement_saved', { title: announcement.title });
+            await fetchAdminData();
+        }
+    };
+
+    const deleteAnnouncement = async (id: string) => {
+        if(window.confirm('¿Estás seguro de que quieres eliminar este anuncio?')) {
+            const announcementToDelete = announcements.find(a => a.id === id);
+            const { error } = await supabase.from('announcements').delete().eq('id', id);
+            if(error) showAlert('Error eliminando anuncio: ' + error.message, 'error');
+            else {
+                showAlert('Anuncio eliminado.', 'success');
+                await logActivity('admin_announcement_deleted', { title: announcementToDelete?.title || 'Desconocido' });
+                await fetchAdminData();
+            }
+        }
+    };
+
+    const toggleAnnouncementActive = async (announcement: Announcement) => {
+        const { error: deactivateError } = await supabase.from('announcements').update({ is_active: false }).neq('id', announcement.id);
+        if(deactivateError) {
+             showAlert('Error al actualizar anuncios: ' + deactivateError.message, 'error');
+             return;
+        }
+
+        const { error: activateError } = await supabase.from('announcements').update({ is_active: !announcement.is_active }).eq('id', announcement.id);
+        if(activateError) showAlert('Error al activar anuncio: ' + activateError.message, 'error');
+        else await fetchAdminData();
+    };
+    
+    const sendNotificationToAll = async (message: string) => {
+        if(!message.trim()) {
+            showAlert('El mensaje no puede estar vacío.', 'error');
+            return;
+        }
+        const { error } = await supabase.functions.invoke('send-notification', { body: { message } });
+        if(error) showAlert('Error al enviar notificación: ' + error.message, 'error');
+        else {
+            showAlert('Notificación enviada a todos los usuarios.', 'success');
+            await logActivity('admin_mass_notification_sent');
+        }
+    };
+
+    const markNotificationsAsRead = async () => {
+        const unreadIds = notifications.filter(n => !n.is_read).map(n => n.id);
+        if (unreadIds.length === 0) return;
+
+        const { error } = await supabase.from('notifications').update({ is_read: true }).in('id', unreadIds);
+        if(error) console.error("Error marking notifications as read:", error);
+        else {
+            const updatedNotifications = notifications.map(n => ({...n, is_read: true}));
+            setNotifications(updatedNotifications);
+        }
     };
     
     const daysUntilExpiry = useMemo(() => {
         if (!currentUser?.activeUntil) return null;
-        const diffTime = new Date(currentUser.activeUntil).getTime() - new Date().getTime();
-        return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        const expiryDate = new Date(currentUser.activeUntil);
+        const today = new Date();
+        const diffTime = expiryDate.getTime() - today.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        return diffDays;
     }, [currentUser]);
 
-    if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">Cargando...</div>;
+    const saveBudget = async (budget: Budget) => {
+        const isNew = !budget.id;
 
-    if (!session || !currentUser) {
-        return (
-            <div className={theme}>
-                <AuthScreen showAlert={showAlert} />
-                <AlertModal alertState={alertState} onClose={() => setAlertState({ ...alertState, isOpen: false })} />
-            </div>
-        );
+        const payload: any = {
+            user_id: currentUser!.id,
+            client_id: budget.client_id,
+            title: budget.title,
+            status: budget.status,
+            items: budget.items.map(({ id: itemId, ...rest }) => rest),
+            discount: budget.discount,
+            notes: budget.notes,
+            valid_until: budget.valid_until,
+        };
+
+        if (!isNew) {
+            payload.id = budget.id;
+        }
+
+        const { error } = await supabase.from('budgets').upsert(payload);
+
+        if (error) {
+            showAlert('Error al guardar el presupuesto: ' + error.message, 'error');
+        } else {
+            showAlert('Presupuesto guardado exitosamente.', 'success');
+            await logActivity(isNew ? 'budget_created' : 'budget_updated', { title: budget.title });
+            await fetchBudgets(currentUser!.id);
+        }
+    };
+
+    const deleteBudget = async (budgetId: string) => {
+        if (window.confirm('¿Estás seguro de que quieres eliminar este presupuesto?')) {
+            const budgetToDelete = budgets.find(b => b.id === budgetId);
+            const { error } = await supabase.from('budgets').delete().eq('id', budgetId);
+            if (error) showAlert('Error al eliminar el presupuesto: ' + error.message, 'error');
+            else {
+                showAlert('Presupuesto eliminado.', 'success');
+                await logActivity('budget_deleted', { title: budgetToDelete?.title || 'Desconocido' });
+                await fetchBudgets(currentUser!.id);
+            }
+        }
+    };
+
+    const convertInquiryToBudget = async (inquiry: Inquiry) => {
+        let client = clients.find(c => c.email && c.email === inquiry.client_email && inquiry.client_email !== '');
+
+        if (!client) {
+            const newClient = await saveClient({
+                id: '',
+                user_id: currentUser!.id,
+                name: inquiry.client_name,
+                phone: inquiry.client_phone || '',
+                email: inquiry.client_email || ''
+            });
+            if (!newClient) {
+                showAlert("No se pudo crear el cliente desde la consulta.", "error");
+                return;
+            }
+            client = newClient;
+        }
+
+        const newBudget: Budget = {
+            id: '', 
+            user_id: currentUser!.id,
+            client_id: client.id,
+            title: inquiry.event_type || `Presupuesto para ${client.name}`,
+            status: 'Borrador',
+            items: [{ id: Math.random().toString(), description: inquiry.event_type || 'Servicio de DJ', quantity: 1, price: 0 }],
+            discount: 0,
+            notes: inquiry.message || '',
+            created_at: new Date().toISOString()
+        };
+        
+        setSelectedBudget(newBudget);
+        setIsBudgetModalOpen(true);
+        setCurrentPage('budgets');
+    };
+
+    const handleGetInquirySuggestion = async (inquiry: Inquiry) => {
+        setAiSuggestion({ title: 'Sugerencia de Respuesta', suggestion: '', isLoading: true });
+        const suggestion = await getInquiryReplySuggestion(inquiry.message || 'El cliente no dejó un mensaje detallado.');
+        setAiSuggestion(prev => ({ ...prev!, suggestion, isLoading: false }));
+    };
+
+    const handleGetFollowUpSuggestion = async (budget: Budget) => {
+        setAiSuggestion({ title: 'Sugerencia de Seguimiento', suggestion: '', isLoading: true });
+        const clientName = clients.find(c => c.id === budget.client_id)?.name || 'Cliente';
+        const suggestion = await getFollowUpEmailSuggestion(clientName, budget.title);
+        setAiSuggestion(prev => ({ ...prev!, suggestion, isLoading: false }));
+    };
+    
+    if (loading) {
+        return <div className="h-screen w-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200">Cargando...</div>;
     }
 
+    if (path.startsWith('/inquiry/')) {
+        const userId = path.split('/')[2];
+        if (userId) {
+            return <PublicInquiryPage userId={userId} />;
+        }
+    }
+    
     return (
-        <div className={`flex min-h-screen ${theme}`}>
-            <Sidebar 
-                currentPage={currentPage} 
-                setCurrentPage={setCurrentPage} 
-                currentUser={currentUser} 
-                handleLogout={handleLogout} 
-                isOpen={isSidebarOpen}
-                setIsOpen={setIsSidebarOpen}
-                unreadSupportCount={Array.from(unreadCounts.values()).reduce((a,b) => a+b, 0)}
-            />
-            <div className={`flex-1 flex flex-col transition-all duration-300 ${isSidebarOpen ? 'md:ml-0' : 'md:ml-64'}`}>
-                <main className="flex-1 p-4 md:p-6 bg-gray-100 dark:bg-gray-900">
-                    <Header 
-                        currentUser={currentUser} 
-                        toggleTheme={toggleTheme} 
-                        theme={theme} 
-                        onMenuClick={() => setIsSidebarOpen(true)}
-                        notifications={notifications}
-                        isNotificationsOpen={isNotificationsOpen}
-                        setIsNotificationsOpen={setIsNotificationsOpen}
-                        markNotificationsAsRead={markNotificationsAsRead}
-                        daysUntilExpiry={daysUntilExpiry}
-                    />
-                    <PageContent
+        <>
+            {session && currentUser ? (
+                <div className="relative md:flex h-screen bg-gray-100 dark:bg-slate-900 text-gray-900 dark:text-gray-100 overflow-hidden">
+                    {isSidebarOpen && <div className="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden" onClick={() => setIsSidebarOpen(false)}></div>}
+                    <Sidebar
                         currentPage={currentPage}
                         setCurrentPage={setCurrentPage}
                         currentUser={currentUser}
-                        events={events}
-                        clients={clients}
-                        budgets={budgets}
-                        inquiries={inquiries}
-                        saveEvent={saveEvent}
-                        deleteEvent={deleteEvent}
-                        saveClient={saveClient}
-                        deleteClient={deleteClient}
-                        saveBudget={saveBudget}
-                        deleteBudget={deleteBudget}
-                        users={users}
-                        saveUser={saveUser}
-                        uploadLogo={uploadLogo}
-                        showAlert={showAlert}
-                        announcements={announcements}
-                        saveAnnouncement={saveAnnouncement}
-                        deleteAnnouncement={deleteAnnouncement}
-                        toggleAnnouncementActive={toggleAnnouncementActive}
-                        sendNotificationToAll={sendNotificationToAll}
-                        fetchInquiries={fetchInquiries}
-                        convertInquiryToBudget={convertInquiryToBudget}
-                        isModalOpen={isBudgetModalOpen}
-                        setIsModalOpen={setIsBudgetModalOpen}
-                        selectedBudget={selectedBudget}
-                        setSelectedBudget={setSelectedBudget}
-                        adminStats={adminStats}
-                        activityLogs={activityLogs}
-                        handleGetInquirySuggestion={handleGetInquirySuggestion}
-                        handleGetFollowUpSuggestion={handleGetFollowUpSuggestion}
-                        chatConversations={chatConversations}
-                        selectedChatUser={selectedChatUser}
-                        handleSelectChatUser={handleSelectChatUser}
-                        chatMessages={chatMessages}
-                        handleSendMessage={handleSendMessage}
-                        isSendingMessage={isSendingMessage}
-                        unreadCountsByConversation={unreadCounts}
+                        handleLogout={handleLogout}
+                        isOpen={isSidebarOpen}
+                        setIsOpen={setIsSidebarOpen}
+                        unreadSupportCount={unreadSupportCount}
                     />
-                </main>
-            </div>
-            <AlertModal alertState={alertState} onClose={() => setAlertState({ ...alertState, isOpen: false })} />
-            {aiSuggestionModal.isOpen && (
-                <AiSuggestionModal
-                    title={aiSuggestionModal.title}
-                    suggestion={aiSuggestionModal.suggestion}
-                    isLoading={aiSuggestionModal.isLoading}
-                    onClose={() => setAiSuggestionModal({ isOpen: false, title: '', suggestion: '', isLoading: false })}
-                />
+                    <main className="flex-1 p-4 md:p-6 overflow-y-auto">
+                        <Header
+                            currentUser={currentUser}
+                            toggleTheme={toggleTheme}
+                            theme={theme}
+                            onMenuClick={() => setIsSidebarOpen(true)}
+                            notifications={notifications}
+                            isNotificationsOpen={isNotificationsOpen}
+                            setIsNotificationsOpen={setIsNotificationsOpen}
+                            markNotificationsAsRead={markNotificationsAsRead}
+                            daysUntilExpiry={daysUntilExpiry}
+                        />
+                        <PageContent
+                            currentPage={currentPage}
+                            currentUser={currentUser}
+                            events={events}
+                            clients={clients}
+                            budgets={budgets}
+                            inquiries={inquiries}
+                            saveEvent={saveEvent}
+                            deleteEvent={deleteEvent}
+                            saveClient={saveClient}
+                            deleteClient={deleteClient}
+                            saveBudget={saveBudget}
+                            deleteBudget={deleteBudget}
+                            users={users}
+                            saveUser={saveUser}
+                            uploadLogo={uploadLogo}
+                            showAlert={showAlert}
+                            announcements={announcements}
+                            saveAnnouncement={saveAnnouncement}
+                            deleteAnnouncement={deleteAnnouncement}
+                            toggleAnnouncementActive={toggleAnnouncementActive}
+                            sendNotificationToAll={sendNotificationToAll}
+                            fetchInquiries={fetchInquiries}
+                            convertInquiryToBudget={convertInquiryToBudget}
+                            isModalOpen={isBudgetModalOpen}
+                            setIsModalOpen={setIsBudgetModalOpen}
+                            selectedBudget={selectedBudget}
+                            setSelectedBudget={setSelectedBudget}
+                            adminStats={adminStats}
+                            activityLogs={activityLogs}
+                            handleGetInquirySuggestion={handleGetInquirySuggestion}
+                            handleGetFollowUpSuggestion={handleGetFollowUpSuggestion}
+                            // Chat Props
+                            chatConversations={chatConversations}
+                            selectedChatUser={selectedChatUser}
+                            handleSelectChatUser={handleSelectChatUser}
+                            chatMessages={chatMessages}
+                            handleSendMessage={handleSendMessage}
+                            isSendingMessage={isSendingMessage}
+                            unreadCountsByConversation={unreadCountsByConversation}
+                        />
+                    </main>
+                    {isAnnouncementModalOpen && activeAnnouncement && (
+                        <AnnouncementModal 
+                            announcement={activeAnnouncement} 
+                            onClose={() => setIsAnnouncementModalOpen(false)} 
+                        />
+                    )}
+                </div>
+            ) : (
+                <AuthScreen showAlert={showAlert} />
             )}
-            {isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 bg-black/50 z-20 md:hidden"></div>}
-        </div>
+            <AlertModal alertState={alertState} onClose={() => setAlertState({ ...alertState, isOpen: false })} />
+            {aiSuggestion && <AiSuggestionModal {...aiSuggestion} onClose={() => setAiSuggestion(null)} />}
+        </>
     );
 };
 
