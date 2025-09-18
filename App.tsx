@@ -1391,7 +1391,14 @@ const ReportsPage: React.FC<{ events: Event[], currentUser: User }> = ({ events,
                 ]
             }),
             theme: 'grid',
-            headStyles: { fillColor: '#1d4ed8' }
+            headStyles: { fillColor: '#1d4ed8' },
+            didDrawPage: (data) => {
+                const pageCount = (doc as any).internal.getNumberOfPages ? (doc as any).internal.getNumberOfPages() : 0;
+                doc.setFontSize(8);
+                doc.setTextColor(150);
+                doc.text(`Generado por GestionSystem`, pageMargin, doc.internal.pageSize.height - 10);
+                doc.text(`Página ${data.pageNumber} de ${pageCount}`, doc.internal.pageSize.width - pageMargin, doc.internal.pageSize.height - 10, { align: 'right' });
+            }
         });
 
         const finalY = (doc as any).lastAutoTable.finalY + 10;
