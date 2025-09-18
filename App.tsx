@@ -1,15 +1,16 @@
 
 
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats, ChatMessage } from './types';
-import { getDashboardInsights, getInquiryReplySuggestion, getFollowUpEmailSuggestion, getBudgetItemsSuggestion } from './services/geminiService';
+import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats, ChatMessage, ScheduleItem } from './types';
+import { getDashboardInsights, getInquiryReplySuggestion, getFollowUpEmailSuggestion, getBudgetItemsSuggestion, generateEventSchedule } from './services/geminiService';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { 
     DashboardIcon, EventsIcon, ClientsIcon, ReportsIcon, SettingsIcon, SunIcon, MoonIcon, 
     LogoutIcon, UserManagementIcon, AgendaIcon, CloseIcon, TrashIcon, PlusIcon, MenuIcon, 
     SuccessIcon, ErrorIcon, BellIcon, WarningIcon, AnnouncementIcon, SendIcon, BudgetIcon, 
     PdfIcon, EditIcon, EmailIcon, InquiryIcon, ActivityLogIcon, SparklesIcon, LogoIconOnly, 
-    BrainCircuitIcon, MessageSquareIcon
+    BrainCircuitIcon, MessageSquareIcon, ClipboardListIcon
 } from './components/Icons.tsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -768,7 +769,7 @@ const PageContent: React.FC<{
                         onGetSuggestion={props.handleGetFollowUpSuggestion}
                     />;
         case 'events':
-            return <EventsPage events={props.events} clients={props.clients} saveEvent={props.saveEvent} deleteEvent={props.deleteEvent} />;
+            return <EventsPage events={props.events} clients={props.clients} saveEvent={props.saveEvent} deleteEvent={props.deleteEvent} showAlert={props.showAlert} />;
         case 'clients':
             return <ClientsPage clients={props.clients} saveClient={props.saveClient} deleteClient={props.deleteClient} />;
         case 'agenda':
@@ -1114,7 +1115,7 @@ const UserFormModal: React.FC<{user: User | null, onSave: (user: User, password?
     );
 };
 
-const EventsPage: React.FC<{events: Event[], clients: Client[], saveEvent: (event: Event) => Promise<void>, deleteEvent: (id: string) => Promise<void>}> = ({ events, clients, saveEvent, deleteEvent }) => {
+const EventsPage: React.FC<{events: Event[], clients: Client[], saveEvent: (event: Event) => Promise<void>, deleteEvent: (id: string) => Promise<void>, showAlert: (message: string, type: 'success' | 'error') => void;}> = ({ events, clients, saveEvent, deleteEvent, showAlert }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
 
@@ -1157,20 +1158,21 @@ const EventsPage: React.FC<{events: Event[], clients: Client[], saveEvent: (even
                     </tbody>
                 </table>
             </div>
-            {isModalOpen && <EventFormModal event={selectedEvent} clients={clients} onSave={handleSave} onClose={() => setIsModalOpen(false)} />}
+            {isModalOpen && <EventFormModal event={selectedEvent} clients={clients} onSave={handleSave} onClose={() => setIsModalOpen(false)} showAlert={showAlert}/>}
         </div>
     );
 };
 
-const EventFormModal: React.FC<{event: Event | null, clients: Client[], onSave: (event: Event) => void, onClose: () => void}> = ({ event, clients, onSave, onClose }) => {
+const EventFormModal: React.FC<{event: Event | null, clients: Client[], onSave: (event: Event) => void, onClose: () => void, showAlert: (message: string, type: 'success' | 'error') => void;}> = ({ event, clients, onSave, onClose, showAlert }) => {
     const isNew = !event?.id;
     const initialEventState = useMemo(() => {
         return event 
-            ? {...event, date: event.date.split('T')[0], expenses: event.expenses.map(e => ({...e, id: Math.random().toString()}))} 
-            : { id: '', user_id: '', client_id: clients[0]?.id || null, client: null, name: '', location: '', date: new Date().toISOString().split('T')[0], amount_charged: 0, expenses: [], observations: '' };
+            ? {...event, date: event.date.split('T')[0], expenses: event.expenses.map(e => ({...e, id: Math.random().toString()})), schedule_items: event.schedule_items?.map(s => ({...s, id: Math.random().toString()})) || []} 
+            : { id: '', user_id: '', client_id: clients[0]?.id || null, client: null, name: '', location: '', date: new Date().toISOString().split('T')[0], amount_charged: 0, expenses: [], observations: '', schedule_items: [] };
     }, [event, clients]);
 
     const [formData, setFormData] = useState<Event>(initialEventState);
+    const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
@@ -1193,6 +1195,24 @@ const EventFormModal: React.FC<{event: Event | null, clients: Client[], onSave: 
     
     const removeExpense = (index: number) => {
         setFormData(prev => ({ ...prev, expenses: formData.expenses.filter((_, i) => i !== index) }));
+    };
+
+    const handleScheduleGenerated = (items: Omit<ScheduleItem, 'id'>[]) => {
+        setFormData(prev => ({
+            ...prev,
+            schedule_items: items.map(item => ({ ...item, id: Math.random().toString() }))
+        }));
+        setIsScheduleModalOpen(false);
+    };
+
+    const handleScheduleItemChange = (index: number, field: 'activity' | 'details' | 'time', value: string) => {
+        const newSchedule = [...(formData.schedule_items || [])];
+        newSchedule[index] = { ...newSchedule[index], [field]: value };
+        setFormData(prev => ({ ...prev, schedule_items: newSchedule }));
+    };
+    
+    const removeScheduleItem = (index: number) => {
+        setFormData(prev => ({...prev, schedule_items: formData.schedule_items?.filter((_, i) => i !== index) }));
     };
     
     const totalExpenses = formData.expenses.reduce((sum, exp) => sum + exp.amount, 0);
@@ -1238,9 +1258,140 @@ const EventFormModal: React.FC<{event: Event | null, clients: Client[], onSave: 
                     </div>
                      <textarea name="observations" value={formData.observations} onChange={handleChange} placeholder="Observaciones..." rows={3} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
                      <div className="text-right font-bold text-lg">Ganancia Neta del Evento: {formatGuarani(netProfit)}</div>
+                     
+                     {/* Schedule Section */}
+                     <div className="border-t pt-4">
+                        <div className="flex justify-between items-center mb-2">
+                             <h3 className="font-semibold flex items-center"><ClipboardListIcon /> <span className="ml-2">Cronograma del Evento</span></h3>
+                             <button type="button" onClick={() => setIsScheduleModalOpen(true)} className="flex items-center bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-blue-700 disabled:bg-blue-300" disabled={!ai}>
+                                 <SparklesIcon /> <span className="ml-1.5">Generar con IA</span>
+                             </button>
+                        </div>
+                        {formData.schedule_items && formData.schedule_items.length > 0 ? (
+                           <EventScheduleDisplay items={formData.schedule_items} onChange={handleScheduleItemChange} onDeleteItem={removeScheduleItem} />
+                        ) : (
+                           <p className="text-center text-gray-500 py-4">Aún no se ha generado un cronograma.</p>
+                        )}
+                     </div>
+
                      <div className="flex justify-end space-x-4 pt-4">
                         <button type="button" onClick={onClose} className="px-4 py-2 rounded bg-gray-200 dark:bg-gray-600">Cancelar</button>
                         <button type="submit" className="px-4 py-2 rounded bg-primary-600 text-white">Guardar Evento</button>
+                    </div>
+                </form>
+            </div>
+            {isScheduleModalOpen && <ScheduleGeneratorModal isOpen={isScheduleModalOpen} onClose={() => setIsScheduleModalOpen(false)} onGenerate={handleScheduleGenerated} showAlert={showAlert} />}
+        </div>
+    );
+};
+
+const EventScheduleDisplay: React.FC<{
+    items: ScheduleItem[],
+    onChange: (index: number, field: 'time' | 'activity' | 'details', value: string) => void,
+    onDeleteItem: (index: number) => void
+}> = ({ items, onChange, onDeleteItem }) => {
+    return (
+        <div className="mt-4 border-l-2 border-primary-500 pl-4 space-y-6">
+            {items.map((item, index) => (
+                <div key={item.id} className="relative">
+                    <div className="absolute -left-[23px] top-1 h-4 w-4 rounded-full bg-primary-500"></div>
+                    <div className="flex items-start space-x-2">
+                         <input
+                            type="text"
+                            value={item.time}
+                            onChange={(e) => onChange(index, 'time', e.target.value)}
+                            className="w-28 p-1 border rounded dark:bg-gray-700 dark:border-gray-600 font-semibold"
+                            placeholder="Hora"
+                        />
+                        <div className="flex-1">
+                             <input
+                                type="text"
+                                value={item.activity}
+                                onChange={(e) => onChange(index, 'activity', e.target.value)}
+                                className="w-full p-1 border rounded dark:bg-gray-700 dark:border-gray-600 font-semibold"
+                                placeholder="Actividad"
+                            />
+                            <textarea
+                                value={item.details}
+                                onChange={(e) => onChange(index, 'details', e.target.value)}
+                                className="w-full mt-1 p-1 border rounded dark:bg-gray-700 dark:border-gray-600 text-sm"
+                                placeholder="Detalles..."
+                                rows={2}
+                            />
+                        </div>
+                        <button type="button" onClick={() => onDeleteItem(index)} className="p-2 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/50 rounded-full">
+                            <TrashIcon />
+                        </button>
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+};
+
+const ScheduleGeneratorModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    onGenerate: (items: Omit<ScheduleItem, 'id'>[]) => void;
+    showAlert: (message: string, type: 'success' | 'error') => void;
+}> = ({ isOpen, onClose, onGenerate, showAlert }) => {
+    const [eventType, setEventType] = useState('Boda');
+    const [startTime, setStartTime] = useState('20:00');
+    const [endTime, setEndTime] = useState('04:00');
+    const [keyMoments, setKeyMoments] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+
+    if (!isOpen) return null;
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setIsLoading(true);
+        try {
+            const resultString = await generateEventSchedule(eventType, startTime, endTime, keyMoments);
+            const parsedResult = JSON.parse(resultString);
+            onGenerate(parsedResult);
+        } catch (error: any) {
+            showAlert(error.message || "Error al generar cronograma.", "error");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4">
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-lg">
+                <h2 className="text-2xl font-bold mb-4">Generar Cronograma con IA</h2>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Tipo de Evento</label>
+                        <select value={eventType} onChange={e => setEventType(e.target.value)} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600">
+                            <option>Boda</option>
+                            <option>15 Años</option>
+                            <option>Evento Corporativo</option>
+                            <option>Cumpleaños</option>
+                            <option>Aniversario</option>
+                        </select>
+                    </div>
+                     <div className="grid grid-cols-2 gap-4">
+                         <div>
+                             <label className="block text-sm font-medium mb-1">Hora de Inicio</label>
+                             <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
+                         </div>
+                         <div>
+                             <label className="block text-sm font-medium mb-1">Hora de Finalización</label>
+                             <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
+                         </div>
+                     </div>
+                     <div>
+                         <label className="block text-sm font-medium mb-1">Momentos Clave</label>
+                         <textarea value={keyMoments} onChange={e => setKeyMoments(e.target.value)} placeholder="Ej: Cena, Vals, Lanzamiento de ramo, Cotillón..." rows={3} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600" />
+                         <p className="text-xs text-gray-500 mt-1">Separa los momentos importantes con comas.</p>
+                     </div>
+                     <div className="flex justify-end space-x-4 pt-4">
+                        <button type="button" onClick={onClose} disabled={isLoading} className="px-4 py-2 rounded bg-gray-200 dark:bg-gray-600">Cancelar</button>
+                        <button type="submit" disabled={isLoading} className="px-4 py-2 rounded bg-primary-600 text-white disabled:bg-primary-300">
+                            {isLoading ? 'Generando...' : 'Generar'}
+                        </button>
                     </div>
                 </form>
             </div>
@@ -2850,6 +3001,7 @@ const App: React.FC = () => {
             amount_charged: event.amount_charged,
             expenses: event.expenses.map(({ id: expenseId, ...rest }) => rest),
             observations: event.observations,
+            schedule_items: event.schedule_items?.map(({ id: scheduleId, ...rest }) => rest) || [],
         };
         
         if (!isNew) {
@@ -3260,4 +3412,5 @@ const App: React.FC = () => {
     );
 };
 
+// FIX: Removed extraneous text causing syntax errors at the end of the file.
 export default App;
