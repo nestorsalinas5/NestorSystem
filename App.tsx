@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats, ChatMessage } from './types';
 import { getDashboardInsights, getInquiryReplySuggestion, getFollowUpEmailSuggestion, getBudgetItemsSuggestion } from './services/geminiService';
@@ -1598,16 +1597,86 @@ const InquiriesPage: React.FC<{
     )
 }
 
+const EmailBudgetModal: React.FC<{
+    budget: Budget;
+    currentUser: User;
+    clients: Client[];
+    onClose: () => void;
+    showAlert: (message: string, type: 'success' | 'error') => void;
+}> = ({ budget, currentUser, clients, onClose, showAlert }) => {
+    const [recipientEmail, setRecipientEmail] = useState(budget.client?.email || '');
+    const [isSending, setIsSending] = useState(false);
+
+    const handleSend = async () => {
+        if (!recipientEmail) {
+            showAlert("Por favor, introduce un email.", "error");
+            return;
+        }
+        setIsSending(true);
+        const client = clients.find(c => c.id === budget.client_id);
+        const doc = await generateBudgetPDF(budget, currentUser, client);
+        const pdfBase64 = doc.output('datauristring').split(',')[1];
+
+        const { error } = await supabase.functions.invoke('send-budget-email', {
+            body: {
+                recipientEmail,
+                clientName: client?.name,
+                companyName: currentUser.company_name,
+                pdfBase64,
+                budgetTitle: budget.title,
+            }
+        });
+
+        if (error) {
+            showAlert("Error al enviar el correo: " + error.message, 'error');
+        } else {
+            showAlert("Presupuesto enviado exitosamente.", 'success');
+             await logActivity('budget_sent', { title: budget.title, clientName: client?.name });
+            onClose();
+        }
+        setIsSending(false);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+            <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-xl w-full max-w-md">
+                 <h2 className="text-2xl font-bold mb-4">Enviar Presupuesto</h2>
+                 <p className="mb-6">Se enviará el PDF del presupuesto a la siguiente dirección de correo:</p>
+                 <input 
+                    type="email" 
+                    value={recipientEmail} 
+                    onChange={(e) => setRecipientEmail(e.target.value)}
+                    placeholder="Email del Cliente"
+                    className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600 mb-6"
+                    required
+                 />
+                 <div className="flex justify-end space-x-4">
+                    <button type="button" onClick={onClose} disabled={isSending} className="px-4 py-2 rounded bg-gray-200 dark:bg-gray-600">Cancelar</button>
+                    <button onClick={handleSend} disabled={isSending} className="px-4 py-2 rounded bg-primary-600 text-white disabled:bg-primary-300">
+                        {isSending ? 'Enviando...' : 'Confirmar y Enviar'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 const BudgetsPage: React.FC<{
-    budgets: Budget[], clients: Client[], currentUser: User,
-    saveBudget: (budget: Budget) => Promise<void>,
-    deleteBudget: (id: string) => Promise<void>,
-    showAlert: (message: string, type: 'success' | 'error') => void,
-    isModalOpen: boolean, setIsModalOpen: (isOpen: boolean) => void,
-    selectedBudget: Budget | null, setSelectedBudget: (budget: Budget | null) => void,
-    onGetSuggestion: (budget: Budget) => void
-}> = (props) => {
-    const { budgets, clients, currentUser, saveBudget, deleteBudget, showAlert, isModalOpen, setIsModalOpen, selectedBudget, setSelectedBudget, onGetSuggestion } = props;
+    budgets: Budget[];
+    clients: Client[];
+    currentUser: User;
+    saveBudget: (budget: Budget) => Promise<void>;
+    deleteBudget: (id: string) => Promise<void>;
+    showAlert: (message: string, type: 'success' | 'error') => void;
+    isModalOpen: boolean;
+    setIsModalOpen: (isOpen: boolean) => void;
+    selectedBudget: Budget | null;
+    setSelectedBudget: (budget: Budget | null) => void;
+    onGetSuggestion: (budget: Budget) => void;
+}> = ({ budgets, clients, currentUser, saveBudget, deleteBudget, showAlert, isModalOpen, setIsModalOpen, selectedBudget, setSelectedBudget, onGetSuggestion }) => {
+
+    const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+    const [budgetToSend, setBudgetToSend] = useState<Budget | null>(null);
 
     const handleOpenModal = (budget: Budget | null) => {
         setSelectedBudget(budget);
@@ -1618,11 +1687,28 @@ const BudgetsPage: React.FC<{
         await saveBudget(budget);
         setIsModalOpen(false);
     };
-    
-    const handleGeneratePdf = async (budget: Budget) => {
-        const client = clients.find(c => c.id === budget.client_id);
-        const doc = await generateBudgetPDF(budget, currentUser, client);
-        doc.save(`Presupuesto_${budget.id.substring(0,6)}_${client?.name || 'cliente'}.pdf`);
+
+    const handleOpenEmailModal = (budget: Budget) => {
+        setBudgetToSend(budget);
+        setIsEmailModalOpen(true);
+    };
+
+    const handleViewPdf = async (budget: Budget) => {
+        const newTab = window.open('', '_blank');
+        if (!newTab) {
+            showAlert("Por favor, permite las ventanas emergentes para ver el PDF.", "error");
+            return;
+        }
+        newTab.document.write('Generando PDF, por favor espera...');
+        try {
+            const client = clients.find(c => c.id === budget.client_id);
+            const doc = await generateBudgetPDF(budget, currentUser, client);
+            newTab.location.href = doc.output('bloburl').toString();
+        } catch (e) {
+            console.error("PDF generation failed:", e);
+            newTab.document.write('Ocurrió un error al generar el PDF.');
+            showAlert("Ocurrió un error al generar el PDF.", "error");
+        }
     };
 
     const getStatusColor = (status: BudgetStatus) => {
@@ -1635,13 +1721,13 @@ const BudgetsPage: React.FC<{
     };
     
     return (
-         <div className="bg-white dark:bg-gray-800 p-4 md:p-6 rounded-lg shadow">
+        <div className="bg-white dark:bg-gray-800 p-4 md:p-6 rounded-lg shadow">
             <div className="flex justify-between items-center mb-4">
                 <h3 className="text-xl font-semibold">Presupuestos</h3>
                 <button onClick={() => handleOpenModal(null)} className="bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700">Crear Presupuesto</button>
             </div>
             <div className="overflow-x-auto">
-                 <table className="w-full text-left">
+                <table className="w-full text-left">
                      <thead><tr className="border-b dark:border-gray-700"><th className="p-2">Título</th><th className="p-2">Cliente</th><th className="p-2">Total</th><th className="p-2">Estado</th><th className="p-2">Acciones</th></tr></thead>
                     <tbody>
                         {budgets.map(budget => {
@@ -1652,11 +1738,26 @@ const BudgetsPage: React.FC<{
                                     <td className="p-2">{clients.find(c => c.id === budget.client_id)?.name || 'N/A'}</td>
                                     <td className="p-2">{formatGuarani(total)}</td>
                                     <td className="p-2"><span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(budget.status)}`}>{budget.status}</span></td>
-                                    <td className="p-2 flex space-x-2 items-center">
-                                         <button onClick={() => handleGeneratePdf(budget)} title="Descargar PDF"><PdfIcon /></button>
-                                         <button onClick={() => onGetSuggestion(budget)} title="Sugerir email de seguimiento"><EmailIcon /></button>
-                                         <button onClick={() => handleOpenModal(budget)} title="Editar"><EditIcon /></button>
-                                         <button onClick={() => deleteBudget(budget.id)} title="Eliminar"><TrashIcon /></button>
+                                    <td className="p-2">
+                                        <div className="flex items-center space-x-2">
+                                            <button title="Ver PDF" onClick={() => handleViewPdf(budget)} className="p-1.5 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700">
+                                                <PdfIcon />
+                                            </button>
+                                            <button title="Enviar por Correo" onClick={() => handleOpenEmailModal(budget)} className="p-1.5 rounded text-green-600 hover:bg-green-100 dark:hover:bg-green-900/50">
+                                                <EmailIcon />
+                                            </button>
+                                            <button title="Editar" onClick={() => handleOpenModal(budget)} className="p-1.5 rounded text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900/50">
+                                                <EditIcon />
+                                            </button>
+                                            <button title="Eliminar" onClick={() => deleteBudget(budget.id)} className="p-1.5 rounded text-red-600 hover:bg-red-100 dark:hover:bg-red-900/50">
+                                                <TrashIcon />
+                                            </button>
+                                            {budget.status === 'Enviado' && (
+                                                <button title="Sugerencia de Seguimiento IA" onClick={() => onGetSuggestion(budget)} className="p-1.5 rounded text-yellow-500 hover:bg-yellow-100 dark:hover:bg-yellow-900/50">
+                                                    <SparklesIcon />
+                                                </button>
+                                            )}
+                                        </div>
                                     </td>
                                 </tr>
                             )
@@ -1665,8 +1766,9 @@ const BudgetsPage: React.FC<{
                 </table>
             </div>
             {isModalOpen && <BudgetFormModal budget={selectedBudget} clients={clients} onSave={handleSave} onClose={() => setIsModalOpen(false)} />}
+            {isEmailModalOpen && budgetToSend && <EmailBudgetModal budget={budgetToSend} currentUser={currentUser} clients={clients} onClose={() => setIsEmailModalOpen(false)} showAlert={showAlert} />}
         </div>
-    )
+    );
 };
 
 const BudgetFormModal: React.FC<{budget: Budget | null, clients: Client[], onSave: (budget: Budget) => void, onClose: () => void}> = ({ budget, clients, onSave, onClose }) => {
