@@ -2206,7 +2206,7 @@ const App: React.FC = () => {
 
     const fetchAdminData = useCallback(async () => {
         // Fetch all users for management
-        const { data: usersData, error: usersError } = await supabase.from('users').select('*').order('created_at', { ascending: false });
+        const { data: usersData, error: usersError } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
         if (usersData) setUsers(usersData);
         else console.error("Error fetching users:", usersError);
 
@@ -2219,9 +2219,9 @@ const App: React.FC = () => {
 
         // Fetch stats
         const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-        const { count: newUsersCount } = await supabase.from('users').select('*', { count: 'exact', head: true }).gte('created_at', thirtyDaysAgo);
+        const { count: newUsersCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).gte('created_at', thirtyDaysAgo);
         const thirtyDaysFromNow = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-        const { count: expiringCount } = await supabase.from('users').select('*', { count: 'exact', head: true }).lte('activeUntil', thirtyDaysFromNow).gte('activeUntil', new Date().toISOString());
+        const { count: expiringCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).lte('activeUntil', thirtyDaysFromNow).gte('activeUntil', new Date().toISOString());
         const { count: totalEventsCount } = await supabase.from('events').select('*', { count: 'exact', head: true });
 
         if(usersData) {
@@ -2277,7 +2277,7 @@ const App: React.FC = () => {
     }, []);
 
     const fetchAdminUserId = useCallback(async () => {
-        const { data, error } = await supabase.from('users').select('id').eq('role', 'admin').limit(1).single();
+        const { data, error } = await supabase.from('profiles').select('id').eq('role', 'admin').limit(1).single();
         if (data) setAdminUserId(data.id);
         else console.error("Could not find admin user:", error);
     }, []);
@@ -2318,7 +2318,7 @@ const App: React.FC = () => {
     }, [currentUser]);
     
     const fetchUserProfile = useCallback(async (userId: string) => {
-        const { data, error } = await supabase.from('users').select('*').eq('id', userId).single();
+        const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
         if (data) setCurrentUser(data);
         else {
             console.error("Error fetching profile:", error);
@@ -2475,7 +2475,7 @@ const App: React.FC = () => {
             if (password) {
                  showAlert('La actualización de contraseña para usuarios existentes debe hacerse a través del flujo de recuperación de contraseña de Supabase.', 'error');
             }
-            const { data, error } = await supabase.from('users').update({
+            const { data, error } = await supabase.from('profiles').update({
                 company_name: user.company_name,
                 status: user.status,
                 activeUntil: user.activeUntil,
@@ -2496,7 +2496,7 @@ const App: React.FC = () => {
             });
             if (authError) { showAlert(authError.message, 'error'); return; }
             if (newAuthUser) {
-                const { data, error } = await supabase.from('users').insert({
+                const { data, error } = await supabase.from('profiles').insert({
                     id: newAuthUser.id,
                     email: newAuthUser.email,
                     company_name: user.company_name,
@@ -2560,7 +2560,7 @@ const App: React.FC = () => {
     }, []);
     
     const sendNotificationToAll = useCallback(async (message: string) => {
-        const { data: usersToNotify, error } = await supabase.from('users').select('id').eq('role', 'user');
+        const { data: usersToNotify, error } = await supabase.from('profiles').select('id').eq('role', 'user');
         if (error || !usersToNotify) { showAlert('Error al obtener usuarios.', 'error'); return; }
         const notificationsToInsert = usersToNotify.map(user => ({ user_id: user.id, message: message, type: 'announcement' }));
         const { error: insertError } = await supabase.from('notifications').insert(notificationsToInsert);
