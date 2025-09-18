@@ -1,4 +1,5 @@
 
+
 export interface Client {
   id: string; // From Supabase
   user_id: string;
@@ -13,6 +14,14 @@ export interface Expense {
   amount: number;
 }
 
+// FIX: Added ScheduleItem interface for the new AI feature.
+export interface ScheduleItem {
+  id: string; // temp client-side id
+  time: string;
+  activity: string;
+  details: string;
+}
+
 export interface Event {
   id:string; // Will be a UUID from Supabase
   user_id: string; // Associate event with a user
@@ -24,6 +33,7 @@ export interface Event {
   amount_charged: number;
   expenses: Expense[];
   observations?: string;
+  schedule_items?: ScheduleItem[]; // FIX: Added field for AI-generated schedule
 }
 
 export type UserRole = 'admin' | 'user';
