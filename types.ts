@@ -14,14 +14,6 @@ export interface Expense {
   amount: number;
 }
 
-// FIX: Added ScheduleItem interface for the new AI feature.
-export interface ScheduleItem {
-  id: string; // temp client-side id
-  time: string;
-  activity: string;
-  details: string;
-}
-
 export interface Event {
   id:string; // Will be a UUID from Supabase
   user_id: string; // Associate event with a user
@@ -33,7 +25,6 @@ export interface Event {
   amount_charged: number;
   expenses: Expense[];
   observations?: string;
-  schedule_items?: ScheduleItem[]; // FIX: Added field for AI-generated schedule
 }
 
 export type UserRole = 'admin' | 'user';
@@ -68,7 +59,6 @@ export interface Notification {
   created_at: string;
 }
 
-// FIX: Added missing Inquiry type definition.
 export interface Inquiry {
   id: string;
   user_id: string;
@@ -82,7 +72,6 @@ export interface Inquiry {
   created_at: string;
 }
 
-// FIX: Added missing ActivityLog type definition.
 export interface ActivityLog {
     id: string;
     created_at: string;
@@ -92,7 +81,6 @@ export interface ActivityLog {
     details: object | null;
 }
 
-// FIX: Added missing AdminDashboardStats type definition.
 export interface AdminDashboardStats {
     newUsersLast30Days: number;
     licensesExpiringSoon: number;
@@ -132,5 +120,4 @@ export interface ChatMessage {
   is_read: boolean;
 }
 
-// FIX: Added 'inquiries' and 'activityLog' to the Page type to resolve assignment errors.
 export type Page = 'dashboard' | 'events' | 'clients' | 'agenda' | 'reports' | 'settings' | 'userManagement' | 'announcements' | 'sendNotification' | 'budgets' | 'inquiries' | 'activityLog' | 'coach' | 'support';
