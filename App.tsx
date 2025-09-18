@@ -1,6 +1,3 @@
-
-
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Page, Event, Client, Expense, User, Notification, Announcement, Budget, BudgetItem, BudgetStatus, Inquiry, ActivityLog, AdminDashboardStats, ChatMessage, ScheduleItem } from './types';
 import { getDashboardInsights, getInquiryReplySuggestion, getFollowUpEmailSuggestion, getBudgetItemsSuggestion, generateEventSchedule } from './services/geminiService';
@@ -3412,5 +3409,4 @@ const App: React.FC = () => {
     );
 };
 
-// FIX: Removed extraneous text causing syntax errors at the end of the file.
 export default App;
